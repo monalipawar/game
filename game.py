@@ -241,7 +241,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · click to lock target, click/E to fire · watch for turrets & chasers
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · click to lock target, click/E to fire · green crosses heal you
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -290,6 +290,7 @@ GAME_HTML = r"""
   let keys = {};
 
   let islands = [], orbs = [], collected = 0, ORB_TOTAL = 0;
+  let healthPacks = [];
   let raceGates = [], raceActive = false, raceStart = 0, raceCheckpoint = 0, bestTime = null;
   let yaw = 0, pitch = 0.28;
   let dragging = false, lastMouseX = 0, lastMouseY = 0;
@@ -391,6 +392,7 @@ GAME_HTML = r"""
     buildRace();
     buildBoss();
     buildEnemies();
+    buildHealthPacks();
     syncGhosts(INIT.otherPlayers);
 
     clock = new THREE.Clock();
@@ -561,6 +563,44 @@ GAME_HTML = r"""
     scene.remove(e.mesh);
     const fresh = buildEnemy(e.type, e.spawn.x, e.spawn.y, e.spawn.z);
     Object.assign(e, fresh);
+  }
+
+  function buildHealthPacks() {
+    const crossMat = new THREE.MeshStandardMaterial({ color: 0x4ade80, emissive: 0x166534, emissiveIntensity: 0.7 });
+    const spots = [];
+    islands.forEach((isl, i) => { if (i % 6 === 0) spots.push(isl); }); // sparse coverage
+    spots.forEach(isl => {
+      const group = new THREE.Group();
+      const bar1 = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.32, 0.32), crossMat);
+      const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.32, 1.1, 0.32), crossMat);
+      group.add(bar1, bar2);
+      group.position.set(isl.x, isl.y + 2, isl.z);
+      scene.add(group);
+      healthPacks.push({ mesh: group, alive: true, deadAt: 0, spawn: { x: isl.x, y: isl.y + 2, z: isl.z } });
+    });
+  }
+
+  function updateHealthPacks(dt) {
+    const now = performance.now() / 1000;
+    healthPacks.forEach(hp => {
+      if (!hp.alive) {
+        if (now - hp.deadAt > 14) {
+          hp.alive = true;
+          hp.mesh.visible = true;
+        }
+        return;
+      }
+      hp.mesh.rotation.y += dt * 1.8;
+      hp.mesh.position.y = hp.spawn.y + Math.sin(now * 2 + hp.spawn.x) * 0.3;
+      if (player.position.distanceTo(hp.mesh.position) < 1.6 && myHp < 100) {
+        myHp = Math.min(100, myHp + 35);
+        hpEl.textContent = '❤ HP: ' + Math.round(myHp);
+        hp.alive = false;
+        hp.deadAt = now;
+        hp.mesh.visible = false;
+        msgEl.textContent = 'Picked up a health pack — +35 HP.';
+      }
+    });
   }
 
   function updateEnemies(dt) {
@@ -990,6 +1030,7 @@ GAME_HTML = r"""
     updateBolts(dt);
     updateEnemies(dt);
     updateEnemyBolts(dt);
+    updateHealthPacks(dt);
     if (lockRing && lockedTarget) {
       const tm = targetMesh(lockedTarget);
       if (tm) {
