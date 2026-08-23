@@ -60,7 +60,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.9rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none;">
-      WASD or arrow keys move · SPACE jump · C toggle camera · click scene for mouse-look · fly into pink gate to start race
+      WASD or arrow keys move · SPACE jump · F toggle flying · C toggle camera · drag mouse to look · fly into pink gate to start race
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -103,7 +103,8 @@ GAME_HTML = r"""
   let islands = [], orbs = [], collected = 0;
   let raceGates = [], raceActive = false, raceStart = 0, raceCheckpoint = 0, bestTime = null;
   let yaw = 0, pitch = 0.28;
-  let pointerLocked = false;
+  let dragging = false, lastMouseX = 0, lastMouseY = 0;
+  let flying = false;
 
   const GRAVITY = -22;
   const MOVE_SPEED = 9;
@@ -174,29 +175,55 @@ GAME_HTML = r"""
     clock = new THREE.Clock();
 
     window.addEventListener('keydown', e => {
-      keys[e.key.toLowerCase()] = true;
-      if (e.key.toLowerCase() === 'c') thirdPerson = !thirdPerson;
+      const k = e.key.toLowerCase();
+      if (!keys[k]) {
+        if (k === 'c') thirdPerson = !thirdPerson;
+        if (k === 'f') { flying = !flying; playerVel.set(0,0,0); msgEl.textContent = flying ? 'Flying enabled — W/S move along your view, SPACE/SHIFT for extra up/down.' : 'Flying disabled — gravity is back on.'; }
+      }
+      keys[k] = true;
       if (e.key.startsWith('Arrow')) e.preventDefault();
     });
     window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
     window.addEventListener('resize', onResize);
 
-    canvas.addEventListener('click', () => {
-      if (started) canvas.requestPointerLock();
+    canvas.style.cursor = 'grab';
+    canvas.addEventListener('mousedown', e => {
+      if (!started) return;
+      dragging = true;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      canvas.style.cursor = 'grabbing';
     });
-    document.addEventListener('pointerlockchange', () => {
-      pointerLocked = document.pointerLockElement === canvas;
-      msgEl.textContent = pointerLocked
-        ? 'Mouse look active — click outside or press Esc to release.'
-        : 'Click the scene to re-enable mouse look.';
+    window.addEventListener('mouseup', () => { dragging = false; canvas.style.cursor = 'grab'; });
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const dx = e.clientX - lastMouseX;
+      const dy = e.clientY - lastMouseY;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      const sens = 0.0035;
+      yaw -= dx * sens;
+      pitch -= dy * sens;
+      pitch = Math.max(-1.3, Math.min(1.3, pitch));
     });
-    document.addEventListener('mousemove', e => {
-      if (!pointerLocked) return;
-      const sens = 0.0022;
-      yaw -= e.movementX * sens;
-      pitch -= e.movementY * sens;
-      pitch = Math.max(-1.2, Math.min(1.2, pitch));
-    });
+    canvas.addEventListener('touchstart', e => {
+      if (!started || e.touches.length === 0) return;
+      dragging = true;
+      lastMouseX = e.touches[0].clientX;
+      lastMouseY = e.touches[0].clientY;
+    }, { passive: true });
+    window.addEventListener('touchmove', e => {
+      if (!dragging || e.touches.length === 0) return;
+      const dx = e.touches[0].clientX - lastMouseX;
+      const dy = e.touches[0].clientY - lastMouseY;
+      lastMouseX = e.touches[0].clientX;
+      lastMouseY = e.touches[0].clientY;
+      const sens = 0.0035;
+      yaw -= dx * sens;
+      pitch -= dy * sens;
+      pitch = Math.max(-1.3, Math.min(1.3, pitch));
+    }, { passive: true });
+    window.addEventListener('touchend', () => { dragging = false; });
 
     loadBest();
     animate();
@@ -268,14 +295,43 @@ GAME_HTML = r"""
   }
 
   function updatePlayer(dt) {
-    const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const flatForward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const flatRight = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
     let move = new THREE.Vector3();
-    if (keys['w'] || keys['arrowup']) move.add(forward);
-    if (keys['s'] || keys['arrowdown']) move.sub(forward);
-    if (keys['d'] || keys['arrowright']) move.add(right);
-    if (keys['a'] || keys['arrowleft']) move.sub(right);
+
+    if (flying) {
+      const lookForward = new THREE.Vector3(
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch)
+      );
+      if (keys['w'] || keys['arrowup']) move.add(lookForward);
+      if (keys['s'] || keys['arrowdown']) move.sub(lookForward);
+      if (keys['d'] || keys['arrowright']) move.add(flatRight);
+      if (keys['a'] || keys['arrowleft']) move.sub(flatRight);
+      if (move.lengthSq() > 0) move.normalize().multiplyScalar(MOVE_SPEED * 1.15);
+      if (keys[' ']) move.y += MOVE_SPEED * 0.9;
+      if (keys['shift']) move.y -= MOVE_SPEED * 0.9;
+
+      player.position.addScaledVector(move, dt);
+      playerVel.set(0, 0, 0);
+      onGround = false;
+
+      if (move.lengthSq() > 0.001) {
+        const targetAngle = Math.atan2(move.x, move.z);
+        player.rotation.y += (targetAngle - player.rotation.y) * Math.min(1, dt * 10);
+      }
+      if (player.position.y < -20) {
+        player.position.set(0, 8, 0);
+      }
+      return;
+    }
+
+    if (keys['w'] || keys['arrowup']) move.add(flatForward);
+    if (keys['s'] || keys['arrowdown']) move.sub(flatForward);
+    if (keys['d'] || keys['arrowright']) move.add(flatRight);
+    if (keys['a'] || keys['arrowleft']) move.sub(flatRight);
     if (move.lengthSq() > 0) {
       move.normalize().multiplyScalar(MOVE_SPEED);
       player.position.x += move.x * dt;
