@@ -121,12 +121,18 @@ GAME_HTML = r"""
 
   function init() {
     scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0620);
     scene.fog = new THREE.FogExp2(0x0a0620, 0.012);
 
-    camera = new THREE.PerspectiveCamera(65, wrap.clientWidth / wrap.clientHeight, 0.1, 1000);
+    const w0 = wrap.clientWidth || wrap.getBoundingClientRect().width || 800;
+    const h0 = wrap.clientHeight || wrap.getBoundingClientRect().height || 500;
+
+    camera = new THREE.PerspectiveCamera(65, w0 / h0, 0.1, 1000);
+    camera.position.set(0, 9, 12);
+    camera.lookAt(0, 6, 0);
 
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
-    renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    renderer.setSize(w0, h0, false);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     scene.add(new THREE.AmbientLight(0x8888ff, 0.6));
@@ -172,12 +178,20 @@ GAME_HTML = r"""
 
     loadBest();
     animate();
+
+    // Re-measure a few times after mount in case the iframe finished
+    // laying out after our initial (possibly premature) size read.
+    [50, 200, 600].forEach(t => setTimeout(onResize, t));
+    window.addEventListener('load', onResize);
   }
 
   function onResize() {
-    camera.aspect = wrap.clientWidth / wrap.clientHeight;
+    const w = wrap.clientWidth || wrap.getBoundingClientRect().width;
+    const h = wrap.clientHeight || wrap.getBoundingClientRect().height;
+    if (!w || !h) return;
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
-    renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    renderer.setSize(w, h, false);
   }
 
   function islandMesh(x, y, z, r, color) {
@@ -340,6 +354,7 @@ GAME_HTML = r"""
 
   function animate() {
     requestAnimationFrame(animate);
+    onResize();
     if (!started) { renderer.render(scene, camera); return; }
     const dt = Math.min(clock.getDelta(), 0.05);
     updatePlayer(dt);
