@@ -106,9 +106,10 @@ GAME_HTML = r"""
   let dragging = false, lastMouseX = 0, lastMouseY = 0;
   let flying = false;
 
-  const GRAVITY = -22;
-  const MOVE_SPEED = 9;
-  const JUMP_SPEED = 10.5;
+  const GRAVITY = -24;
+  const MOVE_SPEED = 20;
+  const JUMP_SPEED = 13;
+  const FLY_SPEED_MULT = 2.4;
 
   function loadBest() {
     try {
@@ -130,7 +131,7 @@ GAME_HTML = r"""
     const w0 = wrap.clientWidth || wrap.getBoundingClientRect().width || 800;
     const h0 = wrap.clientHeight || wrap.getBoundingClientRect().height || 500;
 
-    camera = new THREE.PerspectiveCamera(65, w0 / h0, 0.1, 2000);
+    camera = new THREE.PerspectiveCamera(65, w0 / h0, 0.1, 4000);
     camera.position.set(0, 9, 12);
     camera.lookAt(0, 6, 0);
     yaw = 0; pitch = 0.28;
@@ -267,10 +268,11 @@ GAME_HTML = r"""
         islandMesh(x, y, z, r, colors[i % colors.length]);
       }
     };
-    ring(10, 45, 8, 5, 3.2, 5);
-    ring(14, 85, 12, 8, 3, 5.5);
-    ring(16, 130, 16, 10, 2.8, 6);
-    ring(10, 175, 20, 12, 3, 5.5);
+    ring(14, 70, 8, 6, 3.2, 5);
+    ring(20, 140, 14, 10, 3, 5.5);
+    ring(26, 220, 20, 14, 2.8, 6);
+    ring(20, 300, 26, 16, 3, 5.5);
+    ring(16, 380, 32, 20, 3.2, 6.5);
   }
 
   let ORB_TOTAL = 0;
@@ -284,11 +286,11 @@ GAME_HTML = r"""
       orbs.push(m);
     });
     // extra sky orbs scattered between islands
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 45; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const rad = 20 + Math.random() * 170;
+      const rad = 20 + Math.random() * 370;
       const m = new THREE.Mesh(orbGeo, orbMat.clone());
-      m.position.set(Math.cos(angle) * rad, 8 + Math.random() * 20, Math.sin(angle) * rad);
+      m.position.set(Math.cos(angle) * rad, 8 + Math.random() * 35, Math.sin(angle) * rad);
       scene.add(m);
       orbs.push(m);
     }
@@ -305,10 +307,10 @@ GAME_HTML = r"""
       scene.add(torus);
       return { mesh: torus, x, y, z, hit: false };
     }
-    raceGates.push(makeGate(0, 8, -8));       // start gate
-    raceGates.push(makeGate(45, 10, -40));    // checkpoint 1
-    raceGates.push(makeGate(90, 16, 30));     // checkpoint 2
-    raceGates.push(makeGate(140, 20, -60));   // finish
+    raceGates.push(makeGate(0, 8, -8));        // start gate
+    raceGates.push(makeGate(90, 14, -90));     // checkpoint 1
+    raceGates.push(makeGate(200, 24, 60));     // checkpoint 2
+    raceGates.push(makeGate(320, 34, -140));   // finish
   }
 
   function updatePlayer(dt) {
@@ -327,9 +329,9 @@ GAME_HTML = r"""
       if (keys['s'] || keys['arrowdown']) move.sub(lookForward);
       if (keys['d'] || keys['arrowright']) move.add(flatRight);
       if (keys['a'] || keys['arrowleft']) move.sub(flatRight);
-      if (move.lengthSq() > 0) move.normalize().multiplyScalar(MOVE_SPEED * 1.15);
-      if (keys[' ']) move.y += MOVE_SPEED * 0.9;
-      if (keys['shift']) move.y -= MOVE_SPEED * 0.9;
+      if (move.lengthSq() > 0) move.normalize().multiplyScalar(MOVE_SPEED * FLY_SPEED_MULT);
+      if (keys[' ']) move.y += MOVE_SPEED * 1.6;
+      if (keys['shift']) move.y -= MOVE_SPEED * 1.6;
 
       player.position.addScaledVector(move, dt);
       playerVel.set(0, 0, 0);
