@@ -296,7 +296,7 @@ GAME_HTML = r"""
 
   function updatePlayer(dt) {
     const flatForward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-    const flatRight = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const flatRight = new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
 
     let move = new THREE.Vector3();
 
