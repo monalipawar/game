@@ -78,30 +78,56 @@ if "od_color" not in st.session_state:
 if "od_hp" not in st.session_state:
     st.session_state.od_hp = 100
 
+if "od_mode" not in st.session_state:
+    st.session_state.od_mode = "multiplayer"
+
 # --- Room / identity setup ---
 if not st.session_state.od_room:
-    st.markdown("#### Join a room to start drifting")
-    c1, c2, c3 = st.columns([2, 2, 1])
-    with c1:
-        name_in = st.text_input("Callsign", value=st.session_state.od_name)
-    with c2:
-        room_in = st.text_input("Room code", value="MAIN", help="Share this code with friends to land in the same world.")
-    with c3:
-        st.write("")
-        st.write("")
-        if st.button("Launch ▸", use_container_width=True):
-            st.session_state.od_name = name_in.strip()[:16] or st.session_state.od_name
-            st.session_state.od_room = room_in.strip().upper()[:12] or "MAIN"
-            st.rerun()
+    st.markdown("#### Choose how to play")
+    mode_choice = st.radio(
+        "Mode", ["Multiplayer (room code)", "Singleplayer"],
+        horizontal=True, label_visibility="collapsed"
+    )
+    is_solo = mode_choice.startswith("Singleplayer")
+
+    if is_solo:
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            name_in = st.text_input("Callsign", value=st.session_state.od_name)
+        with c2:
+            st.write("")
+            st.write("")
+            if st.button("Launch ▸", use_container_width=True):
+                st.session_state.od_name = name_in.strip()[:16] or st.session_state.od_name
+                st.session_state.od_mode = "singleplayer"
+                st.session_state.od_room = "SOLO-" + st.session_state.od_player_id
+                st.rerun()
+    else:
+        c1, c2, c3 = st.columns([2, 2, 1])
+        with c1:
+            name_in = st.text_input("Callsign", value=st.session_state.od_name)
+        with c2:
+            room_in = st.text_input("Room code", value="MAIN", help="Share this code with friends to land in the same world.")
+        with c3:
+            st.write("")
+            st.write("")
+            if st.button("Launch ▸", use_container_width=True):
+                st.session_state.od_name = name_in.strip()[:16] or st.session_state.od_name
+                st.session_state.od_mode = "multiplayer"
+                st.session_state.od_room = room_in.strip().upper()[:12] or "MAIN"
+                st.rerun()
     st.stop()
+
+is_solo = st.session_state.od_mode == "singleplayer"
 
 room = st.session_state.od_room
 my_id = st.session_state.od_player_id
 
+mode_label = "Solo flight" if is_solo else f"Room <b>{room}</b>"
 st.markdown(
     f'<div style="text-align:center; color:#7cf7ff; font-size:0.85rem; margin-bottom:0.5rem;">'
-    f'Room <b>{room}</b> · playing as <b>{st.session_state.od_name}</b> '
-    f'<a href="?" style="color:#a9a4d0; margin-left:12px;">leave room</a></div>',
+    f'{mode_label} · playing as <b>{st.session_state.od_name}</b> '
+    f'<a href="?" style="color:#a9a4d0; margin-left:12px;">leave</a></div>',
     unsafe_allow_html=True
 )
 
@@ -170,6 +196,7 @@ INIT_DATA = json.dumps({
     "myHp": st.session_state.od_hp,
     "otherPlayers": other_players,
     "boss": boss_state,
+    "isSolo": is_solo,
 })
 
 GAME_HTML = r"""
@@ -546,7 +573,7 @@ GAME_HTML = r"""
         delete ghosts[id];
       }
     });
-    rosterEl.textContent = 'Players online: ' + (list.length + 1);
+    rosterEl.textContent = INIT.isSolo ? 'Solo flight' : ('Players online: ' + (list.length + 1));
   }
 
   function updateGhosts(dt) {
@@ -749,25 +776,26 @@ GAME_HTML = GAME_HTML.replace("__INIT_DATA__", INIT_DATA)
 
 components.html(GAME_HTML, height=640, scrolling=False)
 
-st.markdown("#### Room chat")
-chat_box = st.container(height=220)
-with chat_box:
-    if not chat_log:
-        st.caption("No messages yet — say hi to your fellow drifters.")
-    for msg in chat_log:
-        st.markdown(
-            f'<div style="margin-bottom:6px;"><span style="color:{msg["color"]}; font-weight:600;">{msg["name"]}:</span> '
-            f'<span style="color:#e8e6ff;">{msg["text"]}</span></div>',
-            unsafe_allow_html=True
-        )
+if not is_solo:
+    st.markdown("#### Room chat")
+    chat_box = st.container(height=220)
+    with chat_box:
+        if not chat_log:
+            st.caption("No messages yet — say hi to your fellow drifters.")
+        for msg in chat_log:
+            st.markdown(
+                f'<div style="margin-bottom:6px;"><span style="color:{msg["color"]}; font-weight:600;">{msg["name"]}:</span> '
+                f'<span style="color:#e8e6ff;">{msg["text"]}</span></div>',
+                unsafe_allow_html=True
+            )
 
-chat_input = st.chat_input("Message the room…")
-if chat_input:
-    chat = load_json(room_chat_path(room), [])
-    chat.append({"name": st.session_state.od_name, "color": st.session_state.od_color,
-                "text": chat_input[:200], "ts": time.time()})
-    save_json(room_chat_path(room), chat[-60:])
-    st.rerun()
+    chat_input = st.chat_input("Message the room…")
+    if chat_input:
+        chat = load_json(room_chat_path(room), [])
+        chat.append({"name": st.session_state.od_name, "color": st.session_state.od_color,
+                    "text": chat_input[:200], "ts": time.time()})
+        save_json(room_chat_path(room), chat[-60:])
+        st.rerun()
 
 st.markdown("""
 <div style="max-width:900px; margin:1rem auto 0 auto; color:#a9a4d0; font-family:'Outfit',sans-serif;
