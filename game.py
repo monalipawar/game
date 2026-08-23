@@ -60,7 +60,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.9rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none;">
-      WASD move · SPACE jump · C toggle camera · fly into pink gate to start race
+      WASD or arrow keys move · SPACE jump · C toggle camera · fly into pink gate to start race
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -157,7 +157,8 @@ GAME_HTML = r"""
     scene.add(new THREE.Points(starGeo, starMat));
 
     // player
-    const pGeo = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.5, 1, 4, 8) : new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
+    const hasCapsule = typeof THREE.CapsuleGeometry === 'function';
+    const pGeo = hasCapsule ? new THREE.CapsuleGeometry(0.5, 1, 4, 8) : new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
     const pMat = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x1a4a55, metalness: 0.3, roughness: 0.4 });
     player = new THREE.Mesh(pGeo, pMat);
     player.position.set(0, 6, 0);
@@ -172,6 +173,7 @@ GAME_HTML = r"""
     window.addEventListener('keydown', e => {
       keys[e.key.toLowerCase()] = true;
       if (e.key.toLowerCase() === 'c') thirdPerson = !thirdPerson;
+      if (e.key.startsWith('Arrow')) e.preventDefault();
     });
     window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
     window.addEventListener('resize', onResize);
@@ -252,10 +254,10 @@ GAME_HTML = r"""
     const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
 
     let move = new THREE.Vector3();
-    if (keys['w']) move.add(forward);
-    if (keys['s']) move.sub(forward);
-    if (keys['d']) move.add(right);
-    if (keys['a']) move.sub(right);
+    if (keys['w'] || keys['arrowup']) move.add(forward);
+    if (keys['s'] || keys['arrowdown']) move.sub(forward);
+    if (keys['d'] || keys['arrowright']) move.add(right);
+    if (keys['a'] || keys['arrowleft']) move.sub(right);
     if (move.lengthSq() > 0) {
       move.normalize().multiplyScalar(MOVE_SPEED);
       player.position.x += move.x * dt;
