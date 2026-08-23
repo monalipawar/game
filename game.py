@@ -218,6 +218,9 @@ GAME_HTML = r"""
     <div id="od-hp" style="margin-top:8px; font-size:0.85rem; color:#fb7185;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
         border:1px solid rgba(251,113,133,0.3);">❤ HP: 100</div>
+    <div id="od-shield" style="margin-top:8px; font-size:0.85rem; color:#7cf7ff;
+        background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
+        border:1px solid rgba(124,247,255,0.3);">🛡 Shield: ready (Q)</div>
   </div>
 
   <div id="od-boss-hud" style="position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:5;
@@ -274,6 +277,7 @@ GAME_HTML = r"""
   const timerEl = document.getElementById('od-timer');
   const orbsEl = document.getElementById('od-orbs');
   const hpEl = document.getElementById('od-hp');
+  const shieldEl = document.getElementById('od-shield');
   const bestEl = document.getElementById('od-best');
   const rosterEl = document.getElementById('od-roster');
   const bossBarEl = document.getElementById('od-boss-bar');
@@ -297,6 +301,9 @@ GAME_HTML = r"""
   let flying = false;
 
   let myHp = INIT.myHp || 100;
+  let shieldActive = false, shieldReadyAt = 0, shieldEndsAt = 0, shieldMesh = null;
+  const SHIELD_DURATION = 4;
+  const SHIELD_COOLDOWN = 10;
   let ghosts = {};       // id -> {mesh, label, target: {x,y,z,yaw}}
   const BOSS_TYPES = [
     { name: 'VOID WYRM', color: 0x8a1f55, emissive: 0xf472b6, boltColor: 0xf472b6 },
@@ -387,6 +394,15 @@ GAME_HTML = r"""
     player.position.set(0, 6, 0);
     scene.add(player);
 
+    const shieldGeo = new THREE.SphereGeometry(1.4, 16, 16);
+    const shieldMat = new THREE.MeshStandardMaterial({
+      color: 0x7cf7ff, emissive: 0x2dd4bf, emissiveIntensity: 0.6,
+      transparent: true, opacity: 0.28, side: THREE.DoubleSide
+    });
+    shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+    shieldMesh.visible = false;
+    player.add(shieldMesh);
+
     buildIslands();
     buildOrbs();
     buildRace();
@@ -403,6 +419,7 @@ GAME_HTML = r"""
         if (k === 'c') thirdPerson = !thirdPerson;
         if (k === 'f') { flying = !flying; playerVel.set(0,0,0); msgEl.textContent = flying ? 'Flying enabled — W/S move along your view, SPACE/SHIFT for extra up/down.' : 'Flying disabled — gravity is back on.'; }
         if (k === 'e') fireBolt();
+        if (k === 'q') activateShield();
       }
       keys[k] = true;
       if (e.key.startsWith('Arrow')) e.preventDefault();
@@ -637,7 +654,43 @@ GAME_HTML = r"""
     });
   }
 
+  function activateShield() {
+    const now = performance.now() / 1000;
+    if (shieldActive || now < shieldReadyAt) return;
+    shieldActive = true;
+    shieldEndsAt = now + SHIELD_DURATION;
+    shieldReadyAt = now + SHIELD_DURATION + SHIELD_COOLDOWN;
+    shieldMesh.visible = true;
+    msgEl.textContent = 'Shield up! Incoming damage is blocked for ' + SHIELD_DURATION + 's.';
+  }
+
+  function updateShield(dt) {
+    const now = performance.now() / 1000;
+    if (shieldActive) {
+      shieldMesh.rotation.y += dt * 1.5;
+      const pulse = 1 + Math.sin(now * 8) * 0.04;
+      shieldMesh.scale.set(pulse, pulse, pulse);
+      const remaining = shieldEndsAt - now;
+      if (remaining <= 0) {
+        shieldActive = false;
+        shieldMesh.visible = false;
+        shieldEl.textContent = '🛡 Shield: cooling down…';
+      } else {
+        shieldEl.textContent = '🛡 Shield: active (' + remaining.toFixed(1) + 's)';
+      }
+    } else if (now < shieldReadyAt) {
+      shieldEl.textContent = '🛡 Shield: cooling down (' + (shieldReadyAt - now).toFixed(1) + 's)';
+    } else {
+      shieldEl.textContent = '🛡 Shield: ready (Q)';
+    }
+  }
+
   function damagePlayer(dmg) {
+    if (shieldActive) {
+      shieldMesh.scale.set(1.25, 1.25, 1.25);
+      setTimeout(() => { if (shieldMesh) shieldMesh.scale.set(1,1,1); }, 120);
+      return;
+    }
     myHp = Math.max(0, myHp - dmg);
     hpEl.textContent = '❤ HP: ' + Math.round(myHp);
     hpEl.style.borderColor = 'rgba(251,113,133,0.9)';
