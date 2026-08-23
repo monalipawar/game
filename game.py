@@ -1,7 +1,40 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import json
+import os
+import time
+import uuid
+import random
 
 st.set_page_config(page_title="OrbitDrift", page_icon="🪐", layout="wide")
+
+STATE_DIR = "/tmp/orbitdrift_rooms"
+os.makedirs(STATE_DIR, exist_ok=True)
+
+def room_state_path(room):
+    return os.path.join(STATE_DIR, f"{room}_state.json")
+
+def room_chat_path(room):
+    return os.path.join(STATE_DIR, f"{room}_chat.json")
+
+def load_json(path, default):
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def save_json(path, data):
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+def default_boss():
+    return {"hp": 900, "max_hp": 900, "tier": 1, "x": 0, "y": 8, "z": -8, "alive": True, "respawn_at": 0}
 
 st.markdown("""
 <style>
@@ -27,11 +60,117 @@ html, body, [class*="css"] { font-family: 'Outfit', sans-serif; }
     margin-top: 0;
     margin-bottom: 1rem;
 }
+div[data-testid="stTextArea"]:has(textarea[aria-label="od_sync_data"]) { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="od-title">🪐 OrbitDrift</p>', unsafe_allow_html=True)
-st.markdown('<p class="od-sub">A sprawling archipelago of floating islands, race gates, and orbs to collect. Press F to fly, C to switch camera.</p>', unsafe_allow_html=True)
+st.markdown('<p class="od-sub">A sprawling archipelago with a shared boss fight, room-code multiplayer, and live chat. Press F to fly, C to switch camera, E to attack the boss.</p>', unsafe_allow_html=True)
+
+if "od_player_id" not in st.session_state:
+    st.session_state.od_player_id = uuid.uuid4().hex[:8]
+if "od_room" not in st.session_state:
+    st.session_state.od_room = ""
+if "od_name" not in st.session_state:
+    st.session_state.od_name = "Drifter" + st.session_state.od_player_id[:3]
+if "od_color" not in st.session_state:
+    st.session_state.od_color = random.choice(["#7cf7ff", "#f472b6", "#a78bfa", "#facc15", "#4ade80", "#fb7185"])
+if "od_hp" not in st.session_state:
+    st.session_state.od_hp = 100
+
+# --- Room / identity setup ---
+if not st.session_state.od_room:
+    st.markdown("#### Join a room to start drifting")
+    c1, c2, c3 = st.columns([2, 2, 1])
+    with c1:
+        name_in = st.text_input("Callsign", value=st.session_state.od_name)
+    with c2:
+        room_in = st.text_input("Room code", value="MAIN", help="Share this code with friends to land in the same world.")
+    with c3:
+        st.write("")
+        st.write("")
+        if st.button("Launch ▸", use_container_width=True):
+            st.session_state.od_name = name_in.strip()[:16] or st.session_state.od_name
+            st.session_state.od_room = room_in.strip().upper()[:12] or "MAIN"
+            st.rerun()
+    st.stop()
+
+room = st.session_state.od_room
+my_id = st.session_state.od_player_id
+
+st.markdown(
+    f'<div style="text-align:center; color:#7cf7ff; font-size:0.85rem; margin-bottom:0.5rem;">'
+    f'Room <b>{room}</b> · playing as <b>{st.session_state.od_name}</b> '
+    f'<a href="?" style="color:#a9a4d0; margin-left:12px;">leave room</a></div>',
+    unsafe_allow_html=True
+)
+
+# --- Handle incoming sync payload from the client (position, chat, boss damage) ---
+sync_raw = st.session_state.get("od_sync_data", "")
+state = load_json(room_state_path(room), {"players": {}, "boss": default_boss()})
+if "boss" not in state:
+    state["boss"] = default_boss()
+
+if sync_raw:
+    try:
+        payload = json.loads(sync_raw)
+        p = payload.get("player", {})
+        state["players"][my_id] = {
+            "name": st.session_state.od_name,
+            "color": st.session_state.od_color,
+            "x": p.get("x", 0), "y": p.get("y", 8), "z": p.get("z", 0),
+            "yaw": p.get("yaw", 0),
+            "hp": p.get("hp", st.session_state.od_hp),
+            "last_seen": time.time(),
+        }
+        st.session_state.od_hp = p.get("hp", st.session_state.od_hp)
+
+        dmg = payload.get("boss_damage", 0)
+        if dmg and state["boss"].get("alive", True):
+            state["boss"]["hp"] = max(0, state["boss"]["hp"] - dmg)
+            if state["boss"]["hp"] <= 0:
+                state["boss"]["alive"] = False
+                state["boss"]["respawn_at"] = time.time() + 12
+
+    except Exception:
+        pass
+
+# respawn boss if timer elapsed
+if not state["boss"].get("alive", True) and time.time() > state["boss"].get("respawn_at", 0):
+    tier = state["boss"].get("tier", 1) + 1
+    new_boss = default_boss()
+    new_boss["tier"] = tier
+    new_boss["hp"] = new_boss["max_hp"] = 900 + (tier - 1) * 350
+    state["boss"] = new_boss
+
+# prune stale players (not synced in 10s)
+now = time.time()
+state["players"] = {pid: pl for pid, pl in state["players"].items() if now - pl.get("last_seen", 0) < 10}
+save_json(room_state_path(room), state)
+
+other_players = [
+    {"id": pid, **pl} for pid, pl in state["players"].items() if pid != my_id
+]
+boss_state = state["boss"]
+chat_log = load_json(room_chat_path(room), [])[-20:]
+
+# internal widgets the JS heartbeat uses to push position/damage/chat back into Streamlit.
+# the text area is hidden via CSS above; the sync button is kept tiny and tucked to the side
+# rather than fully hidden, since reliably hiding it with CSS alone isn't feasible.
+st.text_area("od_sync_data", key="od_sync_data", label_visibility="collapsed")
+sync_col, _ = st.columns([1, 30])
+with sync_col:
+    if st.button("⛭", key="od_sync_btn", help="internal room sync — safe to ignore"):
+        st.rerun()
+
+INIT_DATA = json.dumps({
+    "myId": my_id,
+    "myName": st.session_state.od_name,
+    "myColor": st.session_state.od_color,
+    "myHp": st.session_state.od_hp,
+    "otherPlayers": other_players,
+    "boss": boss_state,
+})
 
 GAME_HTML = r"""
 <div id="od-wrap" style="width:100%; height:78vh; position:relative; border-radius:20px; overflow:hidden;
@@ -49,18 +188,33 @@ GAME_HTML = r"""
     <div id="od-orbs" style="margin-top:8px; font-size:0.85rem; color:#c9c4ff;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
         border:1px solid rgba(167,139,250,0.25);">✨ Orbs: loading…</div>
+    <div id="od-hp" style="margin-top:8px; font-size:0.85rem; color:#fb7185;
+        background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
+        border:1px solid rgba(251,113,133,0.3);">❤ HP: 100</div>
   </div>
 
-  <div id="od-best" style="position:absolute; top:14px; right:14px; z-index:5; color:#c9c4ff;
-      font-family:'Outfit',sans-serif; font-size:0.85rem; background:rgba(20,14,50,0.55);
-      backdrop-filter: blur(8px); padding:8px 14px; border-radius:12px; border:1px solid rgba(244,114,182,0.25);
-      text-align:right;">Best Race: --</div>
+  <div id="od-boss-hud" style="position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:5;
+      width:min(60%,460px); font-family:'Outfit',sans-serif; color:#e8e6ff; text-align:center;">
+    <div id="od-boss-name" style="font-size:0.9rem; font-weight:700; letter-spacing:0.05em; margin-bottom:4px;
+        text-shadow:0 0 8px rgba(244,114,182,0.6);">VOID WYRM · TIER 1</div>
+    <div style="height:14px; border-radius:8px; background:rgba(20,14,50,0.6); border:1px solid rgba(244,114,182,0.35); overflow:hidden;">
+      <div id="od-boss-bar" style="height:100%; width:100%; background:linear-gradient(90deg,#f472b6,#a78bfa);"></div>
+    </div>
+  </div>
+
+  <div id="od-players-hud" style="position:absolute; top:14px; right:14px; z-index:5; color:#c9c4ff;
+      font-family:'Outfit',sans-serif; font-size:0.78rem; background:rgba(20,14,50,0.55);
+      backdrop-filter: blur(8px); padding:8px 14px; border-radius:12px; border:1px solid rgba(124,247,255,0.2);
+      text-align:right; max-width:200px;">
+    <div style="font-weight:600; margin-bottom:4px;">Best Race: <span id="od-best">--</span></div>
+    <div id="od-roster">Players online: 1</div>
+  </div>
 
   <div id="od-msg" style="position:absolute; bottom:16px; left:50%; transform:translateX(-50%); z-index:5;
-      color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.9rem; text-align:center;
+      color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
-      border:1px solid rgba(124,247,255,0.2); pointer-events:none;">
-      WASD or arrow keys move · SPACE jump · F toggle flying · C toggle camera · drag mouse to look · fly into pink gate to start race
+      border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
+      WASD/arrows move · SPACE jump · F fly · C camera · drag mouse to look · E attack boss near center
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -68,9 +222,9 @@ GAME_HTML = r"""
       font-family:'Outfit',sans-serif; color:#e8e6ff; text-align:center;">
     <div style="font-size:2rem; font-weight:800; background:linear-gradient(90deg,#7cf7ff,#a78bfa,#f472b6);
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px;">OrbitDrift</div>
-    <div style="max-width:420px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
-      Drift between floating islands collecting orbs, then dive through a pink gate for a timed race
-      against three checkpoints. Switch camera anytime with C.
+    <div style="max-width:440px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
+      Explore a huge archipelago with other drifters, fight the shared Void Wyrm boss, race checkpoint gates,
+      and chat below the scene. Everyone in this room shares the same boss health.
     </div>
     <button id="od-startbtn" style="padding:14px 34px; border-radius:14px; border:none; cursor:pointer;
         font-family:'Outfit',sans-serif; font-weight:600; font-size:1.05rem; color:#04030d;
@@ -83,12 +237,18 @@ GAME_HTML = r"""
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function() {
+  const INIT = __INIT_DATA__;
+
   const wrap = document.getElementById('od-wrap');
   const canvas = document.getElementById('od-canvas');
   const modeEl = document.getElementById('od-mode');
   const timerEl = document.getElementById('od-timer');
   const orbsEl = document.getElementById('od-orbs');
+  const hpEl = document.getElementById('od-hp');
   const bestEl = document.getElementById('od-best');
+  const rosterEl = document.getElementById('od-roster');
+  const bossBarEl = document.getElementById('od-boss-bar');
+  const bossNameEl = document.getElementById('od-boss-name');
   const msgEl = document.getElementById('od-msg');
   const startScreen = document.getElementById('od-startscreen');
   const startBtn = document.getElementById('od-startbtn');
@@ -100,27 +260,35 @@ GAME_HTML = r"""
   let started = false;
   let keys = {};
 
-  let islands = [], orbs = [], collected = 0;
+  let islands = [], orbs = [], collected = 0, ORB_TOTAL = 0;
   let raceGates = [], raceActive = false, raceStart = 0, raceCheckpoint = 0, bestTime = null;
   let yaw = 0, pitch = 0.28;
   let dragging = false, lastMouseX = 0, lastMouseY = 0;
   let flying = false;
 
+  let myHp = INIT.myHp || 100;
+  let ghosts = {};       // id -> {mesh, label, target: {x,y,z,yaw}}
+  let bossMesh = null, bossHp = INIT.boss.hp, bossMaxHp = INIT.boss.max_hp, bossAlive = INIT.boss.alive;
+  let pendingBossDamage = 0;
+  let lastAttack = 0;
+  const ATTACK_COOLDOWN = 0.6;
+  const ATTACK_RANGE = 6;
+
   const GRAVITY = -24;
-  const MOVE_SPEED = 15;
+  const MOVE_SPEED = 20;
   const JUMP_SPEED = 13;
   const FLY_SPEED_MULT = 2.4;
 
   function loadBest() {
     try {
       const v = localStorage.getItem('orbitdrift_best');
-      if (v) { bestTime = parseFloat(v); bestEl.textContent = 'Best Race: ' + bestTime.toFixed(2) + 's'; }
+      if (v) { bestTime = parseFloat(v); bestEl.textContent = bestTime.toFixed(2) + 's'; }
     } catch(e) {}
   }
   function saveBest(t) {
     bestTime = t;
     try { localStorage.setItem('orbitdrift_best', t.toString()); } catch(e) {}
-    bestEl.textContent = 'Best Race: ' + t.toFixed(2) + 's';
+    bestEl.textContent = t.toFixed(2) + 's';
   }
 
   function init() {
@@ -144,11 +312,10 @@ GAME_HTML = r"""
     const sun = new THREE.DirectionalLight(0xfff0e0, 1.1);
     sun.position.set(30, 50, 20);
     scene.add(sun);
-    const rim = new THREE.PointLight(0xff66cc, 1.2, 200);
+    const rim = new THREE.PointLight(0xff66cc, 1.2, 300);
     rim.position.set(-30, 20, -30);
     scene.add(rim);
 
-    // starfield
     const starGeo = new THREE.BufferGeometry();
     const starCount = 3000;
     const starPos = new Float32Array(starCount * 3);
@@ -161,7 +328,6 @@ GAME_HTML = r"""
     const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.6, transparent: true, opacity: 0.7 });
     scene.add(new THREE.Points(starGeo, starMat));
 
-    // player
     const hasCapsule = typeof THREE.CapsuleGeometry === 'function';
     const pGeo = hasCapsule ? new THREE.CapsuleGeometry(0.5, 1, 4, 8) : new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
     const pMat = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x1a4a55, metalness: 0.3, roughness: 0.4 });
@@ -172,6 +338,8 @@ GAME_HTML = r"""
     buildIslands();
     buildOrbs();
     buildRace();
+    buildBoss();
+    syncGhosts(INIT.otherPlayers);
 
     clock = new THREE.Clock();
 
@@ -180,6 +348,7 @@ GAME_HTML = r"""
       if (!keys[k]) {
         if (k === 'c') thirdPerson = !thirdPerson;
         if (k === 'f') { flying = !flying; playerVel.set(0,0,0); msgEl.textContent = flying ? 'Flying enabled — W/S move along your view, SPACE/SHIFT for extra up/down.' : 'Flying disabled — gravity is back on.'; }
+        if (k === 'e') attackBoss();
       }
       keys[k] = true;
       if (e.key.startsWith('Arrow')) e.preventDefault();
@@ -195,6 +364,7 @@ GAME_HTML = r"""
       lastMouseY = e.clientY;
       canvas.style.cursor = 'grabbing';
     });
+    canvas.addEventListener('click', () => { if (started) attackBoss(); });
     window.addEventListener('mouseup', () => { dragging = false; canvas.style.cursor = 'grab'; });
     window.addEventListener('mousemove', e => {
       if (!dragging) return;
@@ -207,32 +377,15 @@ GAME_HTML = r"""
       pitch -= dy * sens;
       pitch = Math.max(-1.3, Math.min(1.3, pitch));
     });
-    canvas.addEventListener('touchstart', e => {
-      if (!started || e.touches.length === 0) return;
-      dragging = true;
-      lastMouseX = e.touches[0].clientX;
-      lastMouseY = e.touches[0].clientY;
-    }, { passive: true });
-    window.addEventListener('touchmove', e => {
-      if (!dragging || e.touches.length === 0) return;
-      const dx = e.touches[0].clientX - lastMouseX;
-      const dy = e.touches[0].clientY - lastMouseY;
-      lastMouseX = e.touches[0].clientX;
-      lastMouseY = e.touches[0].clientY;
-      const sens = 0.0035;
-      yaw -= dx * sens;
-      pitch -= dy * sens;
-      pitch = Math.max(-1.3, Math.min(1.3, pitch));
-    }, { passive: true });
-    window.addEventListener('touchend', () => { dragging = false; });
 
     loadBest();
+    updateHudStatic();
     animate();
 
-    // Re-measure a few times after mount in case the iframe finished
-    // laying out after our initial (possibly premature) size read.
     [50, 200, 600].forEach(t => setTimeout(onResize, t));
     window.addEventListener('load', onResize);
+
+    setInterval(heartbeat, 1500);
   }
 
   function onResize() {
@@ -275,7 +428,6 @@ GAME_HTML = r"""
     ring(16, 380, 32, 20, 3.2, 6.5);
   }
 
-  let ORB_TOTAL = 0;
   function buildOrbs() {
     const orbGeo = new THREE.OctahedronGeometry(0.4, 0);
     const orbMat = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0x996600, emissiveIntensity: 0.6 });
@@ -285,7 +437,6 @@ GAME_HTML = r"""
       scene.add(m);
       orbs.push(m);
     });
-    // extra sky orbs scattered between islands
     for (let i = 0; i < 45; i++) {
       const angle = Math.random() * Math.PI * 2;
       const rad = 20 + Math.random() * 370;
@@ -299,7 +450,6 @@ GAME_HTML = r"""
   }
 
   function buildRace() {
-    // pink start gate near spawn island
     const gateMat = new THREE.MeshStandardMaterial({ color: 0xf472b6, emissive: 0x8a1f55, emissiveIntensity: 0.7, transparent: true, opacity: 0.85 });
     function makeGate(x, y, z) {
       const torus = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.25, 8, 24), gateMat.clone());
@@ -307,10 +457,103 @@ GAME_HTML = r"""
       scene.add(torus);
       return { mesh: torus, x, y, z, hit: false };
     }
-    raceGates.push(makeGate(0, 8, -8));        // start gate
-    raceGates.push(makeGate(90, 14, -90));     // checkpoint 1
-    raceGates.push(makeGate(200, 24, 60));     // checkpoint 2
-    raceGates.push(makeGate(320, 34, -140));   // finish
+    raceGates.push(makeGate(0, 8, -8));
+    raceGates.push(makeGate(90, 14, -90));
+    raceGates.push(makeGate(200, 24, 60));
+    raceGates.push(makeGate(320, 34, -140));
+  }
+
+  function buildBoss() {
+    const group = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8a1f55, emissive: 0xf472b6, emissiveIntensity: 0.35, roughness: 0.5 });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(3, 20, 20), bodyMat);
+    group.add(body);
+    for (let i = 0; i < 6; i++) {
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2, 6), bodyMat);
+      const a = (i / 6) * Math.PI * 2;
+      spike.position.set(Math.cos(a) * 2.6, Math.sin(a * 2) * 0.6, Math.sin(a) * 2.6);
+      spike.lookAt(spike.position.clone().multiplyScalar(2));
+      spike.rotateX(Math.PI / 2);
+      group.add(spike);
+    }
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0xffe066, emissiveIntensity: 1 });
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 10), eyeMat);
+    eye.position.set(0, 0.5, 2.6);
+    group.add(eye);
+
+    group.position.set(0, 9, -8);
+    scene.add(group);
+    bossMesh = group;
+    updateBossHud();
+  }
+
+  function updateBossHud() {
+    const pct = bossAlive ? Math.max(0, bossHp / bossMaxHp) * 100 : 0;
+    bossBarEl.style.width = pct + '%';
+    bossNameEl.textContent = bossAlive ? ('VOID WYRM · TIER ' + (INIT.boss.tier || 1)) : 'VOID WYRM DEFEATED — reforming…';
+    if (bossMesh) bossMesh.visible = bossAlive;
+  }
+
+  function attackBoss() {
+    if (!started || !bossAlive || !bossMesh) return;
+    const now = performance.now() / 1000;
+    if (now - lastAttack < ATTACK_COOLDOWN) return;
+    if (player.position.distanceTo(bossMesh.position) > ATTACK_RANGE) {
+      msgEl.textContent = 'Get closer to the Void Wyrm to attack (within ' + ATTACK_RANGE + ' units).';
+      return;
+    }
+    lastAttack = now;
+    const dmg = 15 + Math.floor(Math.random() * 16);
+    bossHp = Math.max(0, bossHp - dmg);
+    pendingBossDamage += dmg;
+    updateBossHud();
+    flashBoss();
+    if (bossHp <= 0) {
+      bossAlive = false;
+      updateBossHud();
+      msgEl.textContent = 'The Void Wyrm shatters! It will reform shortly, stronger than before.';
+    }
+  }
+
+  function flashBoss() {
+    if (!bossMesh) return;
+    bossMesh.scale.set(1.15, 1.15, 1.15);
+    setTimeout(() => { if (bossMesh) bossMesh.scale.set(1,1,1); }, 120);
+  }
+
+  function makeGhost(pl) {
+    const geo = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.5, 1, 4, 8) : new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
+    const mat = new THREE.MeshStandardMaterial({ color: pl.color || '#a78bfa', transparent: true, opacity: 0.85 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pl.x, pl.y, pl.z);
+    scene.add(mesh);
+    return { mesh, target: { x: pl.x, y: pl.y, z: pl.z, yaw: pl.yaw || 0 } };
+  }
+
+  function syncGhosts(list) {
+    const seen = {};
+    list.forEach(pl => {
+      seen[pl.id] = true;
+      if (!ghosts[pl.id]) {
+        ghosts[pl.id] = makeGhost(pl);
+      }
+      ghosts[pl.id].target = { x: pl.x, y: pl.y, z: pl.z, yaw: pl.yaw || 0 };
+      ghosts[pl.id].name = pl.name;
+    });
+    Object.keys(ghosts).forEach(id => {
+      if (!seen[id]) {
+        scene.remove(ghosts[id].mesh);
+        delete ghosts[id];
+      }
+    });
+    rosterEl.textContent = 'Players online: ' + (list.length + 1);
+  }
+
+  function updateGhosts(dt) {
+    Object.values(ghosts).forEach(g => {
+      g.mesh.position.lerp(new THREE.Vector3(g.target.x, g.target.y, g.target.z), Math.min(1, dt * 3));
+      g.mesh.rotation.y += (g.target.yaw - g.mesh.rotation.y) * Math.min(1, dt * 3);
+    });
   }
 
   function updatePlayer(dt) {
@@ -341,9 +584,7 @@ GAME_HTML = r"""
         const targetAngle = Math.atan2(move.x, move.z);
         player.rotation.y += (targetAngle - player.rotation.y) * Math.min(1, dt * 10);
       }
-      if (player.position.y < -20) {
-        player.position.set(0, 8, 0);
-      }
+      if (player.position.y < -20) player.position.set(0, 8, 0);
       return;
     }
 
@@ -420,6 +661,7 @@ GAME_HTML = r"""
   function checkRace(dt) {
     orbs.forEach(o => o.rotation.y += dt * 2);
     raceGates.forEach(g => { g.mesh.rotation.z += dt * 0.6; });
+    if (bossMesh) bossMesh.rotation.y += dt * 0.4;
 
     if (!raceActive) {
       const g0 = raceGates[0];
@@ -441,7 +683,7 @@ GAME_HTML = r"""
           timerEl.style.display = 'none';
           if (!bestTime || elapsed < bestTime) {
             saveBest(elapsed);
-            msgEl.textContent = 'New best time: ' + elapsed.toFixed(2) + 's! Fly back through the pink gate to race again.';
+            msgEl.textContent = 'New best time: ' + elapsed.toFixed(2) + 's!';
           } else {
             msgEl.textContent = 'Finished in ' + elapsed.toFixed(2) + 's. Best stays ' + bestTime.toFixed(2) + 's.';
           }
@@ -452,6 +694,33 @@ GAME_HTML = r"""
     }
   }
 
+  function updateHudStatic() {
+    hpEl.textContent = '❤ HP: ' + Math.round(myHp);
+  }
+
+  function heartbeat() {
+    try {
+      const payload = {
+        player: {
+          x: player.position.x, y: player.position.y, z: player.position.z,
+          yaw: player.rotation.y, hp: myHp
+        },
+        boss_damage: pendingBossDamage
+      };
+      pendingBossDamage = 0;
+      const doc = window.parent.document;
+      const inp = doc.querySelector('textarea[aria-label="od_sync_data"]');
+      if (inp) {
+        const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLTextAreaElement.prototype, 'value').set;
+        setter.call(inp, JSON.stringify(payload));
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        const buttons = Array.from(doc.querySelectorAll('button'));
+        const btn = buttons.find(b => b.textContent.trim() === '⛭');
+        if (btn) btn.click();
+      }
+    } catch (e) {}
+  }
+
   function animate() {
     requestAnimationFrame(animate);
     onResize();
@@ -459,6 +728,7 @@ GAME_HTML = r"""
     const dt = Math.min(clock.getDelta(), 0.05);
     updatePlayer(dt);
     updateCamera();
+    updateGhosts(dt);
     checkOrbs();
     checkRace(dt);
     renderer.render(scene, camera);
@@ -475,11 +745,33 @@ GAME_HTML = r"""
 </script>
 """
 
+GAME_HTML = GAME_HTML.replace("__INIT_DATA__", INIT_DATA)
+
 components.html(GAME_HTML, height=640, scrolling=False)
 
+st.markdown("#### Room chat")
+chat_box = st.container(height=220)
+with chat_box:
+    if not chat_log:
+        st.caption("No messages yet — say hi to your fellow drifters.")
+    for msg in chat_log:
+        st.markdown(
+            f'<div style="margin-bottom:6px;"><span style="color:{msg["color"]}; font-weight:600;">{msg["name"]}:</span> '
+            f'<span style="color:#e8e6ff;">{msg["text"]}</span></div>',
+            unsafe_allow_html=True
+        )
+
+chat_input = st.chat_input("Message the room…")
+if chat_input:
+    chat = load_json(room_chat_path(room), [])
+    chat.append({"name": st.session_state.od_name, "color": st.session_state.od_color,
+                "text": chat_input[:200], "ts": time.time()})
+    save_json(room_chat_path(room), chat[-60:])
+    st.rerun()
+
 st.markdown("""
-<div style="max-width:900px; margin:1.5rem auto 0 auto; color:#a9a4d0; font-family:'Outfit',sans-serif;
-    font-size:0.9rem; text-align:center;">
-    Best race time is saved locally in your browser. Reload the page for a fresh explore run any time.
+<div style="max-width:900px; margin:1rem auto 0 auto; color:#a9a4d0; font-family:'Outfit',sans-serif;
+    font-size:0.85rem; text-align:center;">
+    Position, boss damage, and HP sync with the room roughly every 1.5 seconds. Best race time is saved locally per browser.
 </div>
 """, unsafe_allow_html=True)
