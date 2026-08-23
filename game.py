@@ -241,7 +241,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag mouse to look · click boss to lock on, click/E to fire
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · click to lock target, click/E to fire · watch for turrets & chasers
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -251,8 +251,9 @@ GAME_HTML = r"""
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px;">OrbitDrift</div>
     <div style="max-width:440px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
       Explore a huge archipelago with other drifters, lock onto and fire homing bolts at a cycling
-      rotation of three bosses, race checkpoint gates, and chat below the scene. Everyone in this
-      room shares the same boss health.
+      rotation of three bosses plus scattered island enemies — some just sit there as target
+      practice, some shoot back, and some will chase you down. Race checkpoint gates, and chat
+      below the scene. Everyone in this room shares the same boss health.
     </div>
     <button id="od-startbtn" style="padding:14px 34px; border-radius:14px; border:none; cursor:pointer;
         font-family:'Outfit',sans-serif; font-weight:600; font-size:1.05rem; color:#04030d;
@@ -309,11 +310,20 @@ GAME_HTML = r"""
   const ATTACK_COOLDOWN = 0.5;
   const ATTACK_RANGE = 60;
 
+  const ENEMY_TYPES = {
+    sentinel: { label: 'Sentinel Orb', color: 0x2dd4bf, emissive: 0x0f766e, hp: 35, aggressive: false, chases: false },
+    turret:   { label: 'Turret', color: 0xef4444, emissive: 0x7f1d1d, hp: 50, aggressive: true, chases: false },
+    chaser:   { label: 'Chaser', color: 0xa855f7, emissive: 0x581c87, hp: 45, aggressive: true, chases: true }
+  };
+  let enemies = [];
+  let enemyBolts = [];
+
   let raycaster = new THREE.Raycaster();
-  let lockedTarget = null;
+  let lockedTarget = null; // { kind: 'boss' } or { kind: 'enemy', ref: enemyObj }
   let lockRing = null;
   let activeBolts = [];
   let mouseDownPos = null, mouseDownTime = 0;
+  let lastHitFlash = 0;
 
   const GRAVITY = -24;
   const MOVE_SPEED = 20;
@@ -380,6 +390,7 @@ GAME_HTML = r"""
     buildOrbs();
     buildRace();
     buildBoss();
+    buildEnemies();
     syncGhosts(INIT.otherPlayers);
 
     clock = new THREE.Clock();
@@ -514,7 +525,107 @@ GAME_HTML = r"""
     raceGates.push(makeGate(320, 34, -140));
   }
 
-  function buildBoss() {
+  function buildEnemy(type, x, y, z) {
+    const def = ENEMY_TYPES[type];
+    const mat = new THREE.MeshStandardMaterial({ color: def.color, emissive: def.emissive, emissiveIntensity: 0.5, roughness: 0.5 });
+    let mesh;
+    if (type === 'sentinel') mesh = new THREE.Mesh(new THREE.OctahedronGeometry(1.1, 0), mat);
+    else if (type === 'turret') mesh = new THREE.Mesh(new THREE.ConeGeometry(1, 1.8, 6), mat);
+    else mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 0), mat);
+    mesh.position.set(x, y, z);
+    scene.add(mesh);
+    return {
+      mesh, type, def, hp: def.hp, maxHp: def.hp, alive: true,
+      spawn: { x, y, z }, lastShot: 0, deadAt: 0
+    };
+  }
+
+  function buildEnemies() {
+    const types = ['sentinel', 'turret', 'chaser'];
+    let i = 0;
+    islands.forEach(isl => {
+      if (isl.r < 3.5) return; // skip tiny islands
+      if (Math.random() > 0.55) return; // not every island gets one
+      const type = types[i % types.length];
+      i++;
+      const angle = Math.random() * Math.PI * 2;
+      const dist = isl.r * 0.6;
+      buildEnemyToScene(type, isl.x + Math.cos(angle) * dist, isl.y + 2, isl.z + Math.sin(angle) * dist);
+    });
+  }
+  function buildEnemyToScene(type, x, y, z) {
+    enemies.push(buildEnemy(type, x, y, z));
+  }
+
+  function respawnEnemy(e) {
+    scene.remove(e.mesh);
+    const fresh = buildEnemy(e.type, e.spawn.x, e.spawn.y, e.spawn.z);
+    Object.assign(e, fresh);
+  }
+
+  function updateEnemies(dt) {
+    const now = performance.now() / 1000;
+    enemies.forEach(e => {
+      if (!e.alive) {
+        if (now - e.deadAt > 9) respawnEnemy(e);
+        return;
+      }
+      e.mesh.rotation.y += dt * 1.2;
+      e.mesh.position.y = e.spawn.y + Math.sin(now * 1.5 + e.spawn.x) * 0.4;
+
+      const distToPlayer = e.mesh.position.distanceTo(player.position);
+
+      if (e.def.chases && distToPlayer < 55 && distToPlayer > 2) {
+        const dir = new THREE.Vector3().subVectors(player.position, e.mesh.position);
+        dir.y = 0;
+        dir.normalize();
+        e.mesh.position.addScaledVector(dir, 6.5 * dt);
+        if (distToPlayer < 2.4 && now - e.lastShot > 1) {
+          e.lastShot = now;
+          damagePlayer(8 + Math.floor(Math.random() * 6));
+        }
+      }
+
+      if (e.type === 'turret' && distToPlayer < 45 && now - e.lastShot > 2.2) {
+        e.lastShot = now;
+        const mat = new THREE.MeshStandardMaterial({ color: e.def.color, emissive: e.def.color, emissiveIntensity: 1.3 });
+        const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), mat);
+        bolt.position.copy(e.mesh.position);
+        scene.add(bolt);
+        enemyBolts.push({ mesh: bolt, dmg: 10 + Math.floor(Math.random() * 8) });
+      }
+    });
+  }
+
+  function damagePlayer(dmg) {
+    myHp = Math.max(0, myHp - dmg);
+    hpEl.textContent = '❤ HP: ' + Math.round(myHp);
+    hpEl.style.borderColor = 'rgba(251,113,133,0.9)';
+    setTimeout(() => { hpEl.style.borderColor = 'rgba(251,113,133,0.3)'; }, 150);
+    if (myHp <= 0) {
+      myHp = 100;
+      player.position.set(0, 8, 0);
+      playerVel.set(0, 0, 0);
+      msgEl.textContent = 'You went down! Back on your feet at the spawn island.';
+      hpEl.textContent = '❤ HP: 100';
+    }
+  }
+
+  function updateEnemyBolts(dt) {
+    for (let i = enemyBolts.length - 1; i >= 0; i--) {
+      const b = enemyBolts[i];
+      const dir = new THREE.Vector3().subVectors(player.position, b.mesh.position);
+      const dist = dir.length();
+      if (dist < 1.4) {
+        damagePlayer(b.dmg);
+        scene.remove(b.mesh);
+        enemyBolts.splice(i, 1);
+        continue;
+      }
+      dir.normalize();
+      b.mesh.position.addScaledVector(dir, 28 * dt);
+    }
+  }
     const group = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: bossType.color, emissive: bossType.emissive, emissiveIntensity: 0.35, roughness: 0.5 });
     const body = new THREE.Mesh(new THREE.SphereGeometry(3, 20, 20), bodyMat);
@@ -555,19 +666,32 @@ GAME_HTML = r"""
   }
 
   function tryLockTarget(clientX, clientY) {
-    if (!bossMesh || !bossAlive) return;
     const rect = canvas.getBoundingClientRect();
     const mouse = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1
     );
     raycaster.setFromCamera(mouse, camera);
-    const hits = raycaster.intersectObject(bossMesh, true);
-    if (hits.length > 0) {
-      const wasLocked = lockedTarget === bossMesh;
-      lockedTarget = bossMesh;
+
+    const candidates = [];
+    if (bossMesh && bossAlive) candidates.push({ mesh: bossMesh, target: { kind: 'boss' } });
+    enemies.forEach(e => { if (e.alive) candidates.push({ mesh: e.mesh, target: { kind: 'enemy', ref: e } }); });
+
+    let closest = null, closestDist = Infinity;
+    candidates.forEach(c => {
+      const hits = raycaster.intersectObject(c.mesh, true);
+      if (hits.length > 0 && hits[0].distance < closestDist) {
+        closestDist = hits[0].distance;
+        closest = c.target;
+      }
+    });
+
+    if (closest) {
+      const wasLocked = lockedTarget && sameTarget(lockedTarget, closest);
+      lockedTarget = closest;
       lockRing.visible = true;
-      msgEl.textContent = 'Target locked: ' + bossType.name + '. Click again or press E to fire.';
+      const label = closest.kind === 'boss' ? bossType.name : closest.ref.def.label;
+      msgEl.textContent = 'Target locked: ' + label + '. Click again or press E to fire.';
       if (wasLocked) fireBolt();
     } else {
       lockedTarget = null;
@@ -575,41 +699,72 @@ GAME_HTML = r"""
     }
   }
 
+  function sameTarget(a, b) {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === 'boss') return true;
+    return a.ref === b.ref;
+  }
+
+  function targetMesh(t) {
+    if (!t) return null;
+    if (t.kind === 'boss') return bossAlive ? bossMesh : null;
+    return t.ref.alive ? t.ref.mesh : null;
+  }
+
   function fireBolt() {
-    if (!bossAlive || lockedTarget !== bossMesh) return;
+    if (!started || !lockedTarget) return;
+    const mesh = targetMesh(lockedTarget);
+    if (!mesh) { lockedTarget = null; lockRing.visible = false; return; }
     const now = performance.now() / 1000;
     if (now - lastAttack < ATTACK_COOLDOWN) return;
-    if (player.position.distanceTo(bossMesh.position) > ATTACK_RANGE) {
-      msgEl.textContent = 'Too far to fire — close the distance to the ' + bossType.name + '.';
+    if (player.position.distanceTo(mesh.position) > ATTACK_RANGE) {
+      msgEl.textContent = 'Too far to fire — close the distance first.';
       return;
     }
     lastAttack = now;
-    const boltMat = new THREE.MeshStandardMaterial({ color: bossType.boltColor, emissive: bossType.boltColor, emissiveIntensity: 1.2 });
+    const boltColor = lockedTarget.kind === 'boss' ? bossType.boltColor : 0x7cf7ff;
+    const boltMat = new THREE.MeshStandardMaterial({ color: boltColor, emissive: boltColor, emissiveIntensity: 1.2 });
     const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 10), boltMat);
     bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
     scene.add(bolt);
-    activeBolts.push({ mesh: bolt, dmg: 15 + Math.floor(Math.random() * 16) });
+    const dmg = lockedTarget.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10));
+    activeBolts.push({ mesh: bolt, dmg, target: lockedTarget });
   }
 
   function updateBolts(dt) {
     for (let i = activeBolts.length - 1; i >= 0; i--) {
       const b = activeBolts[i];
-      if (!bossAlive || !bossMesh) { scene.remove(b.mesh); activeBolts.splice(i, 1); continue; }
-      const dir = new THREE.Vector3().subVectors(bossMesh.position, b.mesh.position);
+      const mesh = targetMesh(b.target);
+      if (!mesh) { scene.remove(b.mesh); activeBolts.splice(i, 1); continue; }
+      const dir = new THREE.Vector3().subVectors(mesh.position, b.mesh.position);
       const dist = dir.length();
       if (dist < 1.6) {
-        bossHp = Math.max(0, bossHp - b.dmg);
-        pendingBossDamage += b.dmg;
-        flashBoss();
+        if (b.target.kind === 'boss') {
+          bossHp = Math.max(0, bossHp - b.dmg);
+          pendingBossDamage += b.dmg;
+          flashMesh(bossMesh);
+          updateBossHud();
+          if (bossHp <= 0) {
+            bossAlive = false;
+            if (lockedTarget && lockedTarget.kind === 'boss') { lockedTarget = null; lockRing.visible = false; }
+            updateBossHud();
+            msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
+          }
+        } else {
+          const e = b.target.ref;
+          e.hp = Math.max(0, e.hp - b.dmg);
+          flashMesh(e.mesh);
+          if (e.hp <= 0) {
+            e.alive = false;
+            e.deadAt = performance.now() / 1000;
+            e.mesh.visible = false;
+            if (lockedTarget && lockedTarget.kind === 'enemy' && lockedTarget.ref === e) {
+              lockedTarget = null; lockRing.visible = false;
+            }
+          }
+        }
         scene.remove(b.mesh);
         activeBolts.splice(i, 1);
-        updateBossHud();
-        if (bossHp <= 0) {
-          bossAlive = false;
-          lockedTarget = null;
-          updateBossHud();
-          msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
-        }
         continue;
       }
       dir.normalize();
@@ -617,10 +772,10 @@ GAME_HTML = r"""
     }
   }
 
-  function flashBoss() {
-    if (!bossMesh) return;
-    bossMesh.scale.set(1.15, 1.15, 1.15);
-    setTimeout(() => { if (bossMesh) bossMesh.scale.set(1,1,1); }, 120);
+  function flashMesh(mesh) {
+    if (!mesh) return;
+    mesh.scale.set(1.15, 1.15, 1.15);
+    setTimeout(() => { if (mesh) mesh.scale.set(1,1,1); }, 120);
   }
 
   function makeGhost(pl) {
@@ -832,11 +987,18 @@ GAME_HTML = r"""
     updateCamera();
     updateGhosts(dt);
     updateBolts(dt);
-    if (lockRing && lockedTarget === bossMesh && bossAlive) {
-      lockRing.position.set(bossMesh.position.x, bossMesh.position.y, bossMesh.position.z);
-      lockRing.rotation.z += dt * 1.5;
-      const pulse = 1 + Math.sin(performance.now() * 0.006) * 0.08;
-      lockRing.scale.set(pulse, pulse, pulse);
+    updateEnemies(dt);
+    updateEnemyBolts(dt);
+    if (lockRing && lockedTarget) {
+      const tm = targetMesh(lockedTarget);
+      if (tm) {
+        lockRing.position.set(tm.position.x, tm.position.y, tm.position.z);
+        lockRing.rotation.z += dt * 1.5;
+        const pulse = 1 + Math.sin(performance.now() * 0.006) * 0.08;
+        lockRing.scale.set(pulse, pulse, pulse);
+      } else {
+        lockRing.visible = false;
+      }
     }
     checkOrbs();
     checkRace(dt);
