@@ -107,7 +107,7 @@ GAME_HTML = r"""
   let flying = false;
 
   const GRAVITY = -24;
-  const MOVE_SPEED = 20;
+  const MOVE_SPEED = 15;
   const JUMP_SPEED = 13;
   const FLY_SPEED_MULT = 2.4;
 
