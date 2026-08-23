@@ -60,7 +60,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.9rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none;">
-      WASD or arrow keys move · SPACE jump · C toggle camera · fly into pink gate to start race
+      WASD or arrow keys move · SPACE jump · C toggle camera · click scene for mouse-look · fly into pink gate to start race
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -102,6 +102,8 @@ GAME_HTML = r"""
 
   let islands = [], orbs = [], collected = 0;
   let raceGates = [], raceActive = false, raceStart = 0, raceCheckpoint = 0, bestTime = null;
+  let yaw = 0, pitch = 0.28;
+  let pointerLocked = false;
 
   const GRAVITY = -22;
   const MOVE_SPEED = 9;
@@ -130,6 +132,7 @@ GAME_HTML = r"""
     camera = new THREE.PerspectiveCamera(65, w0 / h0, 0.1, 1000);
     camera.position.set(0, 9, 12);
     camera.lookAt(0, 6, 0);
+    yaw = 0; pitch = 0.28;
 
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
     renderer.setSize(w0, h0, false);
@@ -177,6 +180,23 @@ GAME_HTML = r"""
     });
     window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
     window.addEventListener('resize', onResize);
+
+    canvas.addEventListener('click', () => {
+      if (started) canvas.requestPointerLock();
+    });
+    document.addEventListener('pointerlockchange', () => {
+      pointerLocked = document.pointerLockElement === canvas;
+      msgEl.textContent = pointerLocked
+        ? 'Mouse look active — click outside or press Esc to release.'
+        : 'Click the scene to re-enable mouse look.';
+    });
+    document.addEventListener('mousemove', e => {
+      if (!pointerLocked) return;
+      const sens = 0.0022;
+      yaw -= e.movementX * sens;
+      pitch -= e.movementY * sens;
+      pitch = Math.max(-1.2, Math.min(1.2, pitch));
+    });
 
     loadBest();
     animate();
@@ -248,10 +268,8 @@ GAME_HTML = r"""
   }
 
   function updatePlayer(dt) {
-    const forward = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    forward.y = 0; forward.normalize();
-    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+    const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
 
     let move = new THREE.Vector3();
     if (keys['w'] || keys['arrowup']) move.add(forward);
@@ -292,16 +310,21 @@ GAME_HTML = r"""
   }
 
   function updateCamera() {
+    const lookDir = new THREE.Vector3(
+      Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw) * Math.cos(pitch)
+    );
     if (thirdPerson) {
-      const offset = new THREE.Vector3(0, 3.2, 7.5).applyEuler(new THREE.Euler(0, player.rotation.y, 0));
-      const desired = player.position.clone().add(offset);
-      camera.position.lerp(desired, 0.12);
-      camera.lookAt(player.position.clone().add(new THREE.Vector3(0,1,0)));
+      const dist = 7.5, height = 3.2;
+      const back = lookDir.clone().multiplyScalar(-dist);
+      const desired = player.position.clone().add(new THREE.Vector3(0, height, 0)).add(back);
+      camera.position.lerp(desired, 0.18);
+      camera.lookAt(player.position.clone().add(new THREE.Vector3(0, 1, 0)).add(lookDir.clone().multiplyScalar(3)));
       modeEl.textContent = raceActive ? 'RACE MODE · 3RD PERSON' : 'EXPLORE MODE · 3RD PERSON';
     } else {
       const headPos = player.position.clone().add(new THREE.Vector3(0, 0.8, 0));
       camera.position.lerp(headPos, 0.4);
-      const lookDir = new THREE.Vector3(Math.sin(player.rotation.y), 0, Math.cos(player.rotation.y));
       camera.lookAt(headPos.clone().add(lookDir));
       modeEl.textContent = raceActive ? 'RACE MODE · 1ST PERSON' : 'EXPLORE MODE · 1ST PERSON';
     }
