@@ -31,7 +31,7 @@ html, body, [class*="css"] { font-family: 'Outfit', sans-serif; }
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="od-title">🪐 OrbitDrift</p>', unsafe_allow_html=True)
-st.markdown('<p class="od-sub">Explore floating islands, then drift through timed race gates. Press C to switch camera.</p>', unsafe_allow_html=True)
+st.markdown('<p class="od-sub">A sprawling archipelago of floating islands, race gates, and orbs to collect. Press F to fly, C to switch camera.</p>', unsafe_allow_html=True)
 
 GAME_HTML = r"""
 <div id="od-wrap" style="width:100%; height:78vh; position:relative; border-radius:20px; overflow:hidden;
@@ -48,7 +48,7 @@ GAME_HTML = r"""
         border:1px solid rgba(124,247,255,0.25);">00.00</div>
     <div id="od-orbs" style="margin-top:8px; font-size:0.85rem; color:#c9c4ff;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
-        border:1px solid rgba(167,139,250,0.25);">✨ Orbs: 0 / 12</div>
+        border:1px solid rgba(167,139,250,0.25);">✨ Orbs: loading…</div>
   </div>
 
   <div id="od-best" style="position:absolute; top:14px; right:14px; z-index:5; color:#c9c4ff;
@@ -125,12 +125,12 @@ GAME_HTML = r"""
   function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0620);
-    scene.fog = new THREE.FogExp2(0x0a0620, 0.012);
+    scene.fog = new THREE.FogExp2(0x0a0620, 0.0035);
 
     const w0 = wrap.clientWidth || wrap.getBoundingClientRect().width || 800;
     const h0 = wrap.clientHeight || wrap.getBoundingClientRect().height || 500;
 
-    camera = new THREE.PerspectiveCamera(65, w0 / h0, 0.1, 1000);
+    camera = new THREE.PerspectiveCamera(65, w0 / h0, 0.1, 2000);
     camera.position.set(0, 9, 12);
     camera.lookAt(0, 6, 0);
     yaw = 0; pitch = 0.28;
@@ -149,12 +149,12 @@ GAME_HTML = r"""
 
     // starfield
     const starGeo = new THREE.BufferGeometry();
-    const starCount = 1200;
+    const starCount = 3000;
     const starPos = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i++) {
-      starPos[i*3] = (Math.random()-0.5) * 400;
-      starPos[i*3+1] = (Math.random()-0.5) * 400;
-      starPos[i*3+2] = (Math.random()-0.5) * 400;
+      starPos[i*3] = (Math.random()-0.5) * 1400;
+      starPos[i*3+1] = (Math.random()-0.5) * 1400;
+      starPos[i*3+2] = (Math.random()-0.5) * 1400;
     }
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
     const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.6, transparent: true, opacity: 0.7 });
@@ -254,29 +254,46 @@ GAME_HTML = r"""
   }
 
   function buildIslands() {
-    islandMesh(0, 5, 0, 6, 0x4c3d8f);
-    const spots = [
-      [16, 6, -4, 4, 0x3d5a8f], [28, 8, 8, 3.4, 0x8f3d6a],
-      [-14, 7, -10, 4, 0x3d8f6a], [-24, 9, 4, 3.6, 0x8f7a3d],
-      [4, 10, -22, 4.2, 0x5a3d8f], [-8, 12, -30, 3.4, 0x3d8f8f],
-      [20, 13, -24, 3.8, 0x8f3d3d]
-    ];
-    spots.forEach(s => islandMesh(...s));
+    islandMesh(0, 5, 0, 7, 0x4c3d8f);
+    const colors = [0x3d5a8f, 0x8f3d6a, 0x3d8f6a, 0x8f7a3d, 0x5a3d8f, 0x3d8f8f, 0x8f3d3d, 0x6a3d8f, 0x3d6a8f, 0x8f6a3d];
+    const ring = (count, radius, yBase, yVar, rMin, rMax) => {
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+        const rad = radius + (Math.random() - 0.5) * radius * 0.3;
+        const x = Math.cos(angle) * rad;
+        const z = Math.sin(angle) * rad;
+        const y = yBase + (Math.random() - 0.5) * yVar;
+        const r = rMin + Math.random() * (rMax - rMin);
+        islandMesh(x, y, z, r, colors[i % colors.length]);
+      }
+    };
+    ring(10, 45, 8, 5, 3.2, 5);
+    ring(14, 85, 12, 8, 3, 5.5);
+    ring(16, 130, 16, 10, 2.8, 6);
+    ring(10, 175, 20, 12, 3, 5.5);
   }
 
+  let ORB_TOTAL = 0;
   function buildOrbs() {
     const orbGeo = new THREE.OctahedronGeometry(0.4, 0);
     const orbMat = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0x996600, emissiveIntensity: 0.6 });
-    const positions = [
-      [3,7,3],[-3,7,-3],[16,8,-4],[28,10,8],[-14,9,-10],[-24,11,4],
-      [4,12,-22],[-8,14,-30],[20,15,-24],[0,8,8],[10,7,10],[-10,8,-6]
-    ];
-    positions.forEach(p => {
+    islands.forEach(isl => {
       const m = new THREE.Mesh(orbGeo, orbMat.clone());
-      m.position.set(p[0], p[1], p[2]);
+      m.position.set(isl.x + (Math.random()-0.5)*2, isl.y + 2.2 + Math.random()*1.5, isl.z + (Math.random()-0.5)*2);
       scene.add(m);
       orbs.push(m);
     });
+    // extra sky orbs scattered between islands
+    for (let i = 0; i < 20; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const rad = 20 + Math.random() * 170;
+      const m = new THREE.Mesh(orbGeo, orbMat.clone());
+      m.position.set(Math.cos(angle) * rad, 8 + Math.random() * 20, Math.sin(angle) * rad);
+      scene.add(m);
+      orbs.push(m);
+    }
+    ORB_TOTAL = orbs.length;
+    orbsEl.textContent = '✨ Orbs: 0 / ' + ORB_TOTAL;
   }
 
   function buildRace() {
@@ -288,10 +305,10 @@ GAME_HTML = r"""
       scene.add(torus);
       return { mesh: torus, x, y, z, hit: false };
     }
-    raceGates.push(makeGate(0, 8, -8));   // start gate
-    raceGates.push(makeGate(16, 9, -14)); // checkpoint 1
-    raceGates.push(makeGate(28, 12, 2));  // checkpoint 2
-    raceGates.push(makeGate(4, 13, -24)); // finish
+    raceGates.push(makeGate(0, 8, -8));       // start gate
+    raceGates.push(makeGate(45, 10, -40));    // checkpoint 1
+    raceGates.push(makeGate(90, 16, 30));     // checkpoint 2
+    raceGates.push(makeGate(140, 20, -60));   // finish
   }
 
   function updatePlayer(dt) {
@@ -393,7 +410,7 @@ GAME_HTML = r"""
         scene.remove(o);
         orbs.splice(i, 1);
         collected++;
-        orbsEl.textContent = '✨ Orbs: ' + collected + ' / 12';
+        orbsEl.textContent = '✨ Orbs: ' + collected + ' / ' + ORB_TOTAL;
       }
     }
   }
