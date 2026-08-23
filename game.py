@@ -241,7 +241,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag mouse to look · E attack boss near center
+      WASD/arrows move · SPACE jump · F fly · C camera · drag mouse to look · click boss to lock on, click/E to fire
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -250,8 +250,9 @@ GAME_HTML = r"""
     <div style="font-size:2rem; font-weight:800; background:linear-gradient(90deg,#7cf7ff,#a78bfa,#f472b6);
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px;">OrbitDrift</div>
     <div style="max-width:440px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
-      Explore a huge archipelago with other drifters, fight the shared Void Wyrm boss, race checkpoint gates,
-      and chat below the scene. Everyone in this room shares the same boss health.
+      Explore a huge archipelago with other drifters, lock onto and fire homing bolts at a cycling
+      rotation of three bosses, race checkpoint gates, and chat below the scene. Everyone in this
+      room shares the same boss health.
     </div>
     <button id="od-startbtn" style="padding:14px 34px; border-radius:14px; border:none; cursor:pointer;
         font-family:'Outfit',sans-serif; font-weight:600; font-size:1.05rem; color:#04030d;
@@ -295,11 +296,24 @@ GAME_HTML = r"""
 
   let myHp = INIT.myHp || 100;
   let ghosts = {};       // id -> {mesh, label, target: {x,y,z,yaw}}
+  const BOSS_TYPES = [
+    { name: 'VOID WYRM', color: 0x8a1f55, emissive: 0xf472b6, boltColor: 0xf472b6 },
+    { name: 'NOVA SENTINEL', color: 0x1f3a6b, emissive: 0x60a5fa, boltColor: 0x60a5fa },
+    { name: 'CRIMSON WARDEN', color: 0x7a2f10, emissive: 0xfb923c, boltColor: 0xfb923c }
+  ];
   let bossMesh = null, bossHp = INIT.boss.hp, bossMaxHp = INIT.boss.max_hp, bossAlive = INIT.boss.alive;
+  let bossTier = INIT.boss.tier || 1;
+  let bossType = BOSS_TYPES[(bossTier - 1) % BOSS_TYPES.length];
   let pendingBossDamage = 0;
   let lastAttack = 0;
-  const ATTACK_COOLDOWN = 0.6;
-  const ATTACK_RANGE = 6;
+  const ATTACK_COOLDOWN = 0.5;
+  const ATTACK_RANGE = 60;
+
+  let raycaster = new THREE.Raycaster();
+  let lockedTarget = null;
+  let lockRing = null;
+  let activeBolts = [];
+  let mouseDownPos = null, mouseDownTime = 0;
 
   const GRAVITY = -24;
   const MOVE_SPEED = 20;
@@ -375,7 +389,7 @@ GAME_HTML = r"""
       if (!keys[k]) {
         if (k === 'c') thirdPerson = !thirdPerson;
         if (k === 'f') { flying = !flying; playerVel.set(0,0,0); msgEl.textContent = flying ? 'Flying enabled — W/S move along your view, SPACE/SHIFT for extra up/down.' : 'Flying disabled — gravity is back on.'; }
-        if (k === 'e') attackBoss();
+        if (k === 'e') fireBolt();
       }
       keys[k] = true;
       if (e.key.startsWith('Arrow')) e.preventDefault();
@@ -389,10 +403,20 @@ GAME_HTML = r"""
       dragging = true;
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
+      mouseDownPos = { x: e.clientX, y: e.clientY };
+      mouseDownTime = performance.now();
       canvas.style.cursor = 'grabbing';
     });
-    canvas.addEventListener('click', () => { if (started) attackBoss(); });
-    window.addEventListener('mouseup', () => { dragging = false; canvas.style.cursor = 'grab'; });
+    window.addEventListener('mouseup', e => {
+      dragging = false;
+      canvas.style.cursor = 'grab';
+      if (mouseDownPos && started) {
+        const moved = Math.hypot(e.clientX - mouseDownPos.x, e.clientY - mouseDownPos.y);
+        const elapsed = performance.now() - mouseDownTime;
+        if (moved < 6 && elapsed < 350) tryLockTarget(e.clientX, e.clientY);
+      }
+      mouseDownPos = null;
+    });
     window.addEventListener('mousemove', e => {
       if (!dragging) return;
       const dx = e.clientX - lastMouseX;
@@ -492,7 +516,7 @@ GAME_HTML = r"""
 
   function buildBoss() {
     const group = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8a1f55, emissive: 0xf472b6, emissiveIntensity: 0.35, roughness: 0.5 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color: bossType.color, emissive: bossType.emissive, emissiveIntensity: 0.35, roughness: 0.5 });
     const body = new THREE.Mesh(new THREE.SphereGeometry(3, 20, 20), bodyMat);
     group.add(body);
     for (let i = 0; i < 6; i++) {
@@ -511,34 +535,85 @@ GAME_HTML = r"""
     group.position.set(0, 9, -8);
     scene.add(group);
     bossMesh = group;
+
+    const ringGeo = new THREE.TorusGeometry(4.2, 0.12, 8, 32);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.9 });
+    lockRing = new THREE.Mesh(ringGeo, ringMat);
+    lockRing.rotation.x = Math.PI / 2;
+    lockRing.visible = false;
+    scene.add(lockRing);
+
     updateBossHud();
   }
 
   function updateBossHud() {
     const pct = bossAlive ? Math.max(0, bossHp / bossMaxHp) * 100 : 0;
     bossBarEl.style.width = pct + '%';
-    bossNameEl.textContent = bossAlive ? ('VOID WYRM · TIER ' + (INIT.boss.tier || 1)) : 'VOID WYRM DEFEATED — reforming…';
+    bossNameEl.textContent = bossAlive ? (bossType.name + ' · TIER ' + bossTier) : (bossType.name + ' DEFEATED — reforming…');
     if (bossMesh) bossMesh.visible = bossAlive;
+    if (lockRing && !bossAlive) lockRing.visible = false;
   }
 
-  function attackBoss() {
-    if (!started || !bossAlive || !bossMesh) return;
+  function tryLockTarget(clientX, clientY) {
+    if (!bossMesh || !bossAlive) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObject(bossMesh, true);
+    if (hits.length > 0) {
+      const wasLocked = lockedTarget === bossMesh;
+      lockedTarget = bossMesh;
+      lockRing.visible = true;
+      msgEl.textContent = 'Target locked: ' + bossType.name + '. Click again or press E to fire.';
+      if (wasLocked) fireBolt();
+    } else {
+      lockedTarget = null;
+      lockRing.visible = false;
+    }
+  }
+
+  function fireBolt() {
+    if (!bossAlive || lockedTarget !== bossMesh) return;
     const now = performance.now() / 1000;
     if (now - lastAttack < ATTACK_COOLDOWN) return;
     if (player.position.distanceTo(bossMesh.position) > ATTACK_RANGE) {
-      msgEl.textContent = 'Get closer to the Void Wyrm to attack (within ' + ATTACK_RANGE + ' units).';
+      msgEl.textContent = 'Too far to fire — close the distance to the ' + bossType.name + '.';
       return;
     }
     lastAttack = now;
-    const dmg = 15 + Math.floor(Math.random() * 16);
-    bossHp = Math.max(0, bossHp - dmg);
-    pendingBossDamage += dmg;
-    updateBossHud();
-    flashBoss();
-    if (bossHp <= 0) {
-      bossAlive = false;
-      updateBossHud();
-      msgEl.textContent = 'The Void Wyrm shatters! It will reform shortly, stronger than before.';
+    const boltMat = new THREE.MeshStandardMaterial({ color: bossType.boltColor, emissive: bossType.boltColor, emissiveIntensity: 1.2 });
+    const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 10), boltMat);
+    bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
+    scene.add(bolt);
+    activeBolts.push({ mesh: bolt, dmg: 15 + Math.floor(Math.random() * 16) });
+  }
+
+  function updateBolts(dt) {
+    for (let i = activeBolts.length - 1; i >= 0; i--) {
+      const b = activeBolts[i];
+      if (!bossAlive || !bossMesh) { scene.remove(b.mesh); activeBolts.splice(i, 1); continue; }
+      const dir = new THREE.Vector3().subVectors(bossMesh.position, b.mesh.position);
+      const dist = dir.length();
+      if (dist < 1.6) {
+        bossHp = Math.max(0, bossHp - b.dmg);
+        pendingBossDamage += b.dmg;
+        flashBoss();
+        scene.remove(b.mesh);
+        activeBolts.splice(i, 1);
+        updateBossHud();
+        if (bossHp <= 0) {
+          bossAlive = false;
+          lockedTarget = null;
+          updateBossHud();
+          msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
+        }
+        continue;
+      }
+      dir.normalize();
+      b.mesh.position.addScaledVector(dir, 45 * dt);
     }
   }
 
@@ -756,6 +831,13 @@ GAME_HTML = r"""
     updatePlayer(dt);
     updateCamera();
     updateGhosts(dt);
+    updateBolts(dt);
+    if (lockRing && lockedTarget === bossMesh && bossAlive) {
+      lockRing.position.set(bossMesh.position.x, bossMesh.position.y, bossMesh.position.z);
+      lockRing.rotation.z += dt * 1.5;
+      const pulse = 1 + Math.sin(performance.now() * 0.006) * 0.08;
+      lockRing.scale.set(pulse, pulse, pulse);
+    }
     checkOrbs();
     checkRace(dt);
     renderer.render(scene, camera);
