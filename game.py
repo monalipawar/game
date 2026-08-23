@@ -626,6 +626,7 @@ GAME_HTML = r"""
       b.mesh.position.addScaledVector(dir, 28 * dt);
     }
   }
+  function buildBoss() {
     const group = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: bossType.color, emissive: bossType.emissive, emissiveIntensity: 0.35, roughness: 0.5 });
     const body = new THREE.Mesh(new THREE.SphereGeometry(3, 20, 20), bodyMat);
