@@ -448,7 +448,7 @@ GAME_HTML = r"""
       mouseDownPos = null;
     });
     window.addEventListener('mousemove', e => {
-      if (!dragging) return;
+      if (!started) return;
       const dx = e.clientX - lastMouseX;
       const dy = e.clientY - lastMouseY;
       lastMouseX = e.clientX;
