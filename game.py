@@ -361,6 +361,7 @@ GAME_HTML = r"""
   let explosions = [];
   let bullets = [];
   let currentWeapon = 'missile'; // 'bullet' | 'missile' | 'blast'
+  const WEAPON_PLASMA = 'plasma';
   window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
 
@@ -379,6 +380,10 @@ GAME_HTML = r"""
   if (k === '3') {
     currentWeapon = 'blast';
     msgEl.textContent = '💥 BLAST MISSILES equipped';
+  }
+  if (k === '4') {
+  currentWeapon = 'plasma';
+  msgEl.textContent = '⚡ PLASMA equipped';
   }
 });
   const WEAPON_LABELS = { bullet: 'Bullets', missile: 'Target Missiles', blast: 'Blast Missiles' };
