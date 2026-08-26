@@ -240,11 +240,29 @@ GAME_HTML = r"""
     <div id="od-roster">Players online: 1</div>
   </div>
 
+  <div id="od-scope" style="position:absolute; inset:0; z-index:8; display:none; pointer-events:none;">
+    <svg width="100%" height="100%" style="position:absolute; inset:0;">
+      <defs>
+        <mask id="od-scope-mask">
+          <rect x="0" y="0" width="100%" height="100%" fill="white"/>
+          <circle cx="50%" cy="50%" r="28%" fill="black"/>
+        </mask>
+      </defs>
+      <rect x="0" y="0" width="100%" height="100%" fill="black" mask="url(#od-scope-mask)"/>
+      <circle cx="50%" cy="50%" r="28%" fill="none" stroke="#0a0a0a" stroke-width="6"/>
+      <line x1="50%" y1="8%" x2="50%" y2="38%" stroke="#0a0a0a" stroke-width="2"/>
+      <line x1="50%" y1="62%" x2="50%" y2="92%" stroke="#0a0a0a" stroke-width="2"/>
+      <line x1="8%" y1="50%" x2="38%" y2="50%" stroke="#0a0a0a" stroke-width="2"/>
+      <line x1="62%" y1="50%" x2="92%" y2="50%" stroke="#0a0a0a" stroke-width="2"/>
+      <circle cx="50%" cy="50%" r="2.5" fill="#f472b6"/>
+    </svg>
+  </div>
+
   <div id="od-msg" style="position:absolute; bottom:16px; left:50%; transform:translateX(-50%); z-index:5;
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire — auto-aims at any target ahead of you, or click an enemy to lock it in · green crosses heal you
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire — auto-aims at any target ahead of you, or click an enemy to lock it in · hold right-click to scope in · green crosses heal you
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -284,6 +302,7 @@ GAME_HTML = r"""
   const bossBarEl = document.getElementById('od-boss-bar');
   const bossNameEl = document.getElementById('od-boss-name');
   const msgEl = document.getElementById('od-msg');
+  const scopeEl = document.getElementById('od-scope');
   const startScreen = document.getElementById('od-startscreen');
   const startBtn = document.getElementById('od-startbtn');
 
@@ -300,6 +319,9 @@ GAME_HTML = r"""
   let yaw = 0, pitch = 0.28;
   let dragging = false, lastMouseX = 0, lastMouseY = 0;
   let flying = false;
+  let scoping = false;
+  const BASE_FOV = 65;
+  const SCOPE_FOV = 22;
 
   let myHp = INIT.myHp || 100;
   let shieldActive = false, shieldReadyAt = 0, shieldEndsAt = 0, shieldMesh = null;
@@ -436,10 +458,17 @@ GAME_HTML = r"""
     });
     window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
     window.addEventListener('resize', onResize);
+    window.addEventListener('blur', () => { scoping = false; scopeEl.style.display = 'none'; dragging = false; });
 
     canvas.style.cursor = 'grab';
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
     canvas.addEventListener('mousedown', e => {
       if (!started) return;
+      if (e.button === 2) {
+        scoping = true;
+        scopeEl.style.display = 'block';
+        return;
+      }
       dragging = true;
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
@@ -448,6 +477,11 @@ GAME_HTML = r"""
       canvas.style.cursor = 'grabbing';
     });
     window.addEventListener('mouseup', e => {
+      if (e.button === 2) {
+        scoping = false;
+        scopeEl.style.display = 'none';
+        return;
+      }
       dragging = false;
       canvas.style.cursor = 'grab';
       if (mouseDownPos && started) {
@@ -463,7 +497,7 @@ GAME_HTML = r"""
       const dy = e.clientY - lastMouseY;
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
-      const sens = 0.0035;
+      const sens = scoping ? 0.0013 : 0.0035;
       yaw -= dx * sens;
       pitch -= dy * sens;
       pitch = Math.max(-1.3, Math.min(1.3, pitch));
@@ -782,7 +816,13 @@ GAME_HTML = r"""
       gunBasePos.y + bobY,
       gunBasePos.z + gunKick * 0.18
     );
-    gunGroup.visible = started;
+    gunGroup.visible = started && !scoping;
+  }
+
+  function updateScope(dt) {
+    const targetFov = (started && scoping) ? SCOPE_FOV : BASE_FOV;
+    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12);
+    camera.updateProjectionMatrix();
   }
 
   function buildBoss() {
@@ -1328,6 +1368,7 @@ GAME_HTML = r"""
     updateHealthPacks(dt);
     updateShield(dt);
     updateGunViewmodel(dt);
+    updateScope(dt);
     if (lockRing && lockedTarget) {
       const tm = targetMesh(lockedTarget);
       if (tm) {
