@@ -265,7 +265,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire · 1 bullets · 2 target missiles · 3 blast missiles · right-click toggles scope · green crosses heal you
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire (hold for rapid fire) · 1 bullets · 2 target missiles · 3 blast missiles · 4 toggles rapid fire · right-click toggles scope · green crosses heal you
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -275,11 +275,12 @@ GAME_HTML = r"""
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px;">OrbitDrift</div>
     <div style="max-width:440px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
       Explore a huge archipelago with other drifters. Switch between rapid-fire bullets,
-      auto-aiming target missiles, and area-damage blast missiles (keys 1/2/3), and take on a
-      cycling rotation of three bosses plus scattered island enemies — some just sit there as
-      target practice, some shoot back, and some will chase you down. Right-click toggles a
-      scope for precise aim. Race checkpoint gates, and chat below the scene. Everyone in this
-      room shares the same boss health.
+      auto-aiming target missiles, and area-damage blast missiles (keys 1/2/3) — press 4 to
+      toggle rapid fire on any of them and hold E to unload, and take on a cycling rotation of
+      three bosses plus scattered island enemies — some just sit there as target practice, some
+      shoot back, and some will chase you down. Right-click toggles a scope for precise aim.
+      Race checkpoint gates, and chat below the scene. Everyone in this room shares the same
+      boss health.
     </div>
     <button id="od-startbtn" style="padding:14px 34px; border-radius:14px; border:none; cursor:pointer;
         font-family:'Outfit',sans-serif; font-weight:600; font-size:1.05rem; color:#04030d;
@@ -366,6 +367,8 @@ GAME_HTML = r"""
   let explosions = [];
   let bullets = [];
   let currentWeapon = 'missile'; // 'bullet' | 'missile' | 'blast'
+  let rapidFire = false;
+  const RAPID_MULT = 0.32;
   const WEAPON_LABELS = { bullet: 'Bullets', missile: 'Target Missiles', blast: 'Blast Missiles' };
   const BULLET_COOLDOWN = 0.18;
   const BULLET_SPEED = 220;
@@ -471,6 +474,7 @@ GAME_HTML = r"""
         if (k === '1') switchWeapon('bullet');
         if (k === '2') switchWeapon('missile');
         if (k === '3') switchWeapon('blast');
+        if (k === '4') toggleRapidFire();
       }
       keys[k] = true;
       if (e.key.startsWith('Arrow')) e.preventDefault();
@@ -1083,16 +1087,17 @@ GAME_HTML = r"""
   function fireBolt() {
     if (!started) return;
     const now = performance.now() / 1000;
+    const mult = rapidFire ? RAPID_MULT : 1;
 
     if (currentWeapon === 'bullet') {
-      if (now - lastAttack < BULLET_COOLDOWN) return;
+      if (now - lastAttack < BULLET_COOLDOWN * mult) return;
       fireBulletShot(now);
       return;
     }
 
-    if (now - lastAttack < ATTACK_COOLDOWN) return;
     const isBlast = currentWeapon === 'blast';
-    if (isBlast && now - lastAttack < BLAST_COOLDOWN) return;
+    const cooldown = isBlast ? BLAST_COOLDOWN : ATTACK_COOLDOWN;
+    if (now - lastAttack < cooldown * mult) return;
 
     const target = lockedTarget || autoAcquireTarget();
 
@@ -1153,11 +1158,19 @@ GAME_HTML = r"""
 
   const WEAPON_ICONS = { bullet: '🔫', missile: '🎯', blast: '💥' };
   const WEAPON_KEYS = { bullet: '1', missile: '2', blast: '3' };
+  function weaponLabelText() {
+    return WEAPON_ICONS[currentWeapon] + ' Weapon: ' + WEAPON_LABELS[currentWeapon] + ' (' + WEAPON_KEYS[currentWeapon] + ')' + (rapidFire ? ' ⚡ RAPID' : '');
+  }
   function switchWeapon(w) {
     if (currentWeapon === w) return;
     currentWeapon = w;
-    weaponEl.textContent = WEAPON_ICONS[w] + ' Weapon: ' + WEAPON_LABELS[w] + ' (' + WEAPON_KEYS[w] + ')';
+    weaponEl.textContent = weaponLabelText();
     msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
+  }
+  function toggleRapidFire() {
+    rapidFire = !rapidFire;
+    weaponEl.textContent = weaponLabelText();
+    msgEl.textContent = rapidFire ? 'Rapid fire engaged — hold E to unload.' : 'Rapid fire disengaged.';
   }
 
   function updateBullets(dt) {
@@ -1558,6 +1571,7 @@ GAME_HTML = r"""
     updateShield(dt);
     updateGunViewmodel(dt);
     updateScope(dt);
+    if (rapidFire && keys['e'] && started) fireBolt();
     if (lockRing && lockedTarget) {
       const tm = targetMesh(lockedTarget);
       if (tm) {
