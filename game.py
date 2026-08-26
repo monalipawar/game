@@ -335,8 +335,9 @@ GAME_HTML = r"""
   let lastHitFlash = 0;
   let gunGroup = null, gunMuzzle = null, gunBasePos = null, gunKick = 0;
   let freeBolts = [];
-  const FREE_BOLT_SPEED = 90;
-  const FREE_BOLT_LIFETIME = 2.2;
+  let trailPuffs = [];
+  const FREE_BOLT_SPEED = 70;
+  const FREE_BOLT_LIFETIME = 8;
   const FREE_BOLT_BOSS_RADIUS = 2.6;
   const FREE_BOLT_ENEMY_RADIUS = 1.5;
 
@@ -870,6 +871,70 @@ GAME_HTML = r"""
     return t.ref.alive ? t.ref.mesh : null;
   }
 
+  function makeMissile(color) {
+    const group = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8d8e0, metalness: 0.6, roughness: 0.3 });
+    const noseMat = new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.9 });
+    const finMat = new THREE.MeshStandardMaterial({ color: 0x555566, metalness: 0.5, roughness: 0.4 });
+    const flameMat = new THREE.MeshStandardMaterial({ color: 0xffaa33, emissive: 0xff6600, emissiveIntensity: 1.6, transparent: true, opacity: 0.9 });
+
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.9, 10), bodyMat);
+    body.rotation.x = Math.PI / 2;
+    group.add(body);
+
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.4, 10), noseMat);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.set(0, 0, -0.65);
+    group.add(nose);
+
+    for (let i = 0; i < 4; i++) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.03, 0.22), finMat);
+      const a = (i / 4) * Math.PI * 2;
+      fin.position.set(Math.cos(a) * 0.12, Math.sin(a) * 0.12, 0.35);
+      fin.rotation.z = a;
+      group.add(fin);
+    }
+
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.5, 8), flameMat);
+    flame.rotation.x = -Math.PI / 2;
+    flame.position.set(0, 0, 0.6);
+    group.add(flame);
+    group.userData.flame = flame;
+
+    return group;
+  }
+
+  function orientMissile(mesh, dir) {
+    const lookTarget = mesh.position.clone().add(dir);
+    mesh.up.set(0, 1, 0);
+    mesh.lookAt(lookTarget);
+  }
+
+  function spawnTrailPuff(pos) {
+    const mat = new THREE.MeshStandardMaterial({ color: 0xcfd6e6, transparent: true, opacity: 0.55 });
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 6), mat);
+    puff.position.copy(pos);
+    scene.add(puff);
+    const born = performance.now() / 1000;
+    trailPuffs.push({ mesh: puff, born });
+  }
+
+  function updateTrailPuffs(dt) {
+    const now = performance.now() / 1000;
+    for (let i = trailPuffs.length - 1; i >= 0; i--) {
+      const p = trailPuffs[i];
+      const age = now - p.born;
+      if (age > 0.6) {
+        scene.remove(p.mesh);
+        trailPuffs.splice(i, 1);
+        continue;
+      }
+      const scale = 1 + age * 2.5;
+      p.mesh.scale.set(scale, scale, scale);
+      p.mesh.material.opacity = 0.55 * (1 - age / 0.6);
+    }
+  }
+
   function fireBolt() {
     if (!started) return;
     const now = performance.now() / 1000;
@@ -878,36 +943,31 @@ GAME_HTML = r"""
     if (lockedTarget) {
       const mesh = targetMesh(lockedTarget);
       if (!mesh) { lockedTarget = null; lockRing.visible = false; return; }
-      if (player.position.distanceTo(mesh.position) > ATTACK_RANGE) {
-        msgEl.textContent = 'Too far to fire — close the distance first.';
-        return;
-      }
       lastAttack = now;
       recoil();
       const boltColor = lockedTarget.kind === 'boss' ? bossType.boltColor : 0x7cf7ff;
-      const boltMat = new THREE.MeshStandardMaterial({ color: boltColor, emissive: boltColor, emissiveIntensity: 1.2 });
-      const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 10), boltMat);
+      const bolt = makeMissile(boltColor);
       bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
       scene.add(bolt);
       const dmg = lockedTarget.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10));
-      activeBolts.push({ mesh: bolt, dmg, target: lockedTarget });
+      activeBolts.push({ mesh: bolt, dmg, target: lockedTarget, lastPuff: now });
       return;
     }
 
     // Free-aim shot: fires straight from the gun muzzle along the camera's look direction,
-    // no lock-on required. Hits whatever it travels into (boss or enemy).
+    // no lock-on required and no maximum range — it flies until it hits something or times out.
     lastAttack = now;
     recoil();
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
     const muzzlePos = new THREE.Vector3();
     gunMuzzle.getWorldPosition(muzzlePos);
-    const boltMat = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x7cf7ff, emissiveIntensity: 1.3 });
-    const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), boltMat);
+    const bolt = makeMissile(0x7cf7ff);
     bolt.position.copy(muzzlePos);
+    orientMissile(bolt, dir);
     scene.add(bolt);
     const dmg = 10 + Math.floor(Math.random() * 9);
-    freeBolts.push({ mesh: bolt, dir: dir.clone(), dmg, born: now });
+    freeBolts.push({ mesh: bolt, dir: dir.clone(), dmg, born: now, lastPuff: now });
   }
 
   function recoil() {
@@ -919,6 +979,11 @@ GAME_HTML = r"""
     for (let i = freeBolts.length - 1; i >= 0; i--) {
       const b = freeBolts[i];
       b.mesh.position.addScaledVector(b.dir, FREE_BOLT_SPEED * dt);
+
+      if (now - b.lastPuff > 0.04) {
+        spawnTrailPuff(b.mesh.position.clone().addScaledVector(b.dir, 0.4));
+        b.lastPuff = now;
+      }
 
       let hit = false;
       if (bossMesh && bossAlive && b.mesh.position.distanceTo(bossMesh.position) < FREE_BOLT_BOSS_RADIUS) {
@@ -962,12 +1027,19 @@ GAME_HTML = r"""
   }
 
   function updateBolts(dt) {
+    const now = performance.now() / 1000;
     for (let i = activeBolts.length - 1; i >= 0; i--) {
       const b = activeBolts[i];
       const mesh = targetMesh(b.target);
       if (!mesh) { scene.remove(b.mesh); activeBolts.splice(i, 1); continue; }
       const dir = new THREE.Vector3().subVectors(mesh.position, b.mesh.position);
       const dist = dir.length();
+      dir.normalize();
+      orientMissile(b.mesh, dir);
+      if (now - b.lastPuff > 0.04) {
+        spawnTrailPuff(b.mesh.position.clone());
+        b.lastPuff = now;
+      }
       if (dist < 1.6) {
         if (b.target.kind === 'boss') {
           bossHp = Math.max(0, bossHp - b.dmg);
@@ -997,7 +1069,6 @@ GAME_HTML = r"""
         activeBolts.splice(i, 1);
         continue;
       }
-      dir.normalize();
       b.mesh.position.addScaledVector(dir, 45 * dt);
     }
   }
@@ -1220,6 +1291,7 @@ GAME_HTML = r"""
     updateEnemies(dt);
     updateEnemyBolts(dt);
     updateFreeBolts(dt);
+    updateTrailPuffs(dt);
     updateHealthPacks(dt);
     updateShield(dt);
     updateGunViewmodel(dt);
