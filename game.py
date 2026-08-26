@@ -244,7 +244,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire where you're aiming · click an enemy to lock on, then click/E to fire homing shots · green crosses heal you
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire — auto-aims at any target ahead of you, or click an enemy to lock it in · green crosses heal you
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -935,27 +935,60 @@ GAME_HTML = r"""
     }
   }
 
+  function autoAcquireTarget() {
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    const camPos = new THREE.Vector3();
+    camera.getWorldPosition(camPos);
+
+    const candidates = [];
+    if (bossMesh && bossAlive) candidates.push({ kind: 'boss' });
+    enemies.forEach(e => { if (e.alive) candidates.push({ kind: 'enemy', ref: e }); });
+
+    let best = null, bestScore = -Infinity;
+    candidates.forEach(c => {
+      const mesh = targetMesh(c);
+      if (!mesh) return;
+      const toTarget = new THREE.Vector3().subVectors(mesh.position, camPos);
+      const dist = toTarget.length();
+      toTarget.normalize();
+      const alignment = toTarget.dot(camDir); // 1 = dead center, <0 = behind
+      if (alignment < 0.3) return; // roughly outside a ~70° cone in front of the camera
+      const score = alignment - dist * 0.002; // prefer well-aimed, then closer
+      if (score > bestScore) {
+        bestScore = score;
+        best = c;
+      }
+    });
+    return best;
+  }
+
   function fireBolt() {
     if (!started) return;
     const now = performance.now() / 1000;
     if (now - lastAttack < ATTACK_COOLDOWN) return;
 
-    if (lockedTarget) {
-      const mesh = targetMesh(lockedTarget);
-      if (!mesh) { lockedTarget = null; lockRing.visible = false; return; }
-      lastAttack = now;
-      recoil();
-      const boltColor = lockedTarget.kind === 'boss' ? bossType.boltColor : 0x7cf7ff;
-      const bolt = makeMissile(boltColor);
-      bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
-      scene.add(bolt);
-      const dmg = lockedTarget.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10));
-      activeBolts.push({ mesh: bolt, dmg, target: lockedTarget, lastPuff: now });
-      return;
+    const target = lockedTarget || autoAcquireTarget();
+
+    if (target) {
+      const mesh = targetMesh(target);
+      if (!mesh) {
+        if (lockedTarget === target) { lockedTarget = null; lockRing.visible = false; }
+      } else {
+        lastAttack = now;
+        recoil();
+        const boltColor = target.kind === 'boss' ? bossType.boltColor : 0x7cf7ff;
+        const bolt = makeMissile(boltColor);
+        bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
+        scene.add(bolt);
+        const dmg = target.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10));
+        activeBolts.push({ mesh: bolt, dmg, target: target, lastPuff: now });
+        return;
+      }
     }
 
-    // Free-aim shot: fires straight from the gun muzzle along the camera's look direction,
-    // no lock-on required and no maximum range — it flies until it hits something or times out.
+    // Nothing to auto-aim at — fires straight from the gun muzzle along the camera's look
+    // direction instead, with no maximum range.
     lastAttack = now;
     recoil();
     const dir = new THREE.Vector3();
