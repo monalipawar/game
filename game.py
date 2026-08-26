@@ -361,6 +361,26 @@ GAME_HTML = r"""
   let explosions = [];
   let bullets = [];
   let currentWeapon = 'missile'; // 'bullet' | 'missile' | 'blast'
+  window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+
+  const k = e.key;
+
+  if (k === '1') {
+    currentWeapon = 'bullet';
+    msgEl.textContent = '🔫 BULLETS equipped';
+  }
+
+  if (k === '2') {
+    currentWeapon = 'missile';
+    msgEl.textContent = '🚀 TARGET MISSILES equipped';
+  }
+
+  if (k === '3') {
+    currentWeapon = 'blast';
+    msgEl.textContent = '💥 BLAST MISSILES equipped';
+  }
+});
   const WEAPON_LABELS = { bullet: 'Bullets', missile: 'Target Missiles', blast: 'Blast Missiles' };
   const BULLET_COOLDOWN = 0.18;
   const BULLET_SPEED = 220;
