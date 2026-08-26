@@ -221,6 +221,9 @@ GAME_HTML = r"""
     <div id="od-shield" style="margin-top:8px; font-size:0.85rem; color:#7cf7ff;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
         border:1px solid rgba(124,247,255,0.3);">🛡 Shield: ready (Q)</div>
+    <div id="od-weapon" style="margin-top:8px; font-size:0.85rem; color:#facc15;
+        background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
+        border:1px solid rgba(250,204,21,0.3);">🎯 Weapon: Target Missiles (2)</div>
   </div>
 
   <div id="od-boss-hud" style="position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:5;
@@ -262,7 +265,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire — auto-aims at any target ahead of you, or click an enemy to lock it in · hold right-click to scope in · green crosses heal you
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire · 1 bullets · 2 target missiles · 3 blast missiles · right-click toggles scope · green crosses heal you
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -271,11 +274,12 @@ GAME_HTML = r"""
     <div style="font-size:2rem; font-weight:800; background:linear-gradient(90deg,#7cf7ff,#a78bfa,#f472b6);
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px;">OrbitDrift</div>
     <div style="max-width:440px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
-      Explore a huge archipelago with other drifters. Fire freely wherever you're aiming with E,
-      or click an enemy to lock on for homing shots, against a cycling rotation of three bosses
-      plus scattered island enemies — some just sit there as target practice, some shoot back,
-      and some will chase you down. Race checkpoint gates, and chat below the scene. Everyone in
-      this room shares the same boss health.
+      Explore a huge archipelago with other drifters. Switch between rapid-fire bullets,
+      auto-aiming target missiles, and area-damage blast missiles (keys 1/2/3), and take on a
+      cycling rotation of three bosses plus scattered island enemies — some just sit there as
+      target practice, some shoot back, and some will chase you down. Right-click toggles a
+      scope for precise aim. Race checkpoint gates, and chat below the scene. Everyone in this
+      room shares the same boss health.
     </div>
     <button id="od-startbtn" style="padding:14px 34px; border-radius:14px; border:none; cursor:pointer;
         font-family:'Outfit',sans-serif; font-weight:600; font-size:1.05rem; color:#04030d;
@@ -297,6 +301,7 @@ GAME_HTML = r"""
   const orbsEl = document.getElementById('od-orbs');
   const hpEl = document.getElementById('od-hp');
   const shieldEl = document.getElementById('od-shield');
+  const weaponEl = document.getElementById('od-weapon');
   const bestEl = document.getElementById('od-best');
   const rosterEl = document.getElementById('od-roster');
   const bossBarEl = document.getElementById('od-boss-bar');
@@ -361,31 +366,6 @@ GAME_HTML = r"""
   let explosions = [];
   let bullets = [];
   let currentWeapon = 'missile'; // 'bullet' | 'missile' | 'blast'
-  const WEAPON_PLASMA = 'plasma';
-  window.addEventListener('keydown', (e) => {
-  if (e.repeat) return;
-
-  const k = e.key;
-
-  if (k === '1') {
-    currentWeapon = 'bullet';
-    msgEl.textContent = '🔫 BULLETS equipped';
-  }
-
-  if (k === '2') {
-    currentWeapon = 'missile';
-    msgEl.textContent = '🚀 TARGET MISSILES equipped';
-  }
-
-  if (k === '3') {
-    currentWeapon = 'blast';
-    msgEl.textContent = '💥 BLAST MISSILES equipped';
-  }
-  if (k === '4') {
-  currentWeapon = 'plasma';
-  msgEl.textContent = '⚡ PLASMA equipped';
-  }
-});
   const WEAPON_LABELS = { bullet: 'Bullets', missile: 'Target Missiles', blast: 'Blast Missiles' };
   const BULLET_COOLDOWN = 0.18;
   const BULLET_SPEED = 220;
@@ -486,27 +466,11 @@ GAME_HTML = r"""
       if (!keys[k]) {
         if (k === 'c') thirdPerson = !thirdPerson;
         if (k === 'f') { flying = !flying; playerVel.set(0,0,0); msgEl.textContent = flying ? 'Flying enabled — W/S move along your view, SPACE/SHIFT for extra up/down.' : 'Flying disabled — gravity is back on.'; }
-        if (k === '1') {
-  currentWeapon = 'bullet';
-  msgEl.textContent = '🔫 RAPID BULLETS equipped';
-}
-
-if (k === '2') {
-  currentWeapon = 'missile';
-  msgEl.textContent = '🚀 RAPID TARGET MISSILES equipped';
-}
-
-if (k === '3') {
-  currentWeapon = 'blast';
-  msgEl.textContent = '💥 RAPID BLAST MISSILES equipped';
-}
-
-if (k === '4') {
-  currentWeapon = 'plasma';
-  msgEl.textContent = '⚡ PLASMA equipped';
-}
         if (k === 'e') fireBolt();
         if (k === 'q') activateShield();
+        if (k === '1') switchWeapon('bullet');
+        if (k === '2') switchWeapon('missile');
+        if (k === '3') switchWeapon('blast');
       }
       keys[k] = true;
       if (e.key.startsWith('Arrow')) e.preventDefault();
@@ -520,8 +484,7 @@ if (k === '4') {
     canvas.addEventListener('mousedown', e => {
       if (!started) return;
       if (e.button === 2) {
-        scoping = true;
-        scopeEl.style.display = 'block';
+        toggleScope();
         return;
       }
       dragging = true;
@@ -532,11 +495,7 @@ if (k === '4') {
       canvas.style.cursor = 'grabbing';
     });
     window.addEventListener('mouseup', e => {
-      if (e.button === 2) {
-        scoping = false;
-        scopeEl.style.display = 'none';
-        return;
-      }
+      if (e.button === 2) return;
       dragging = false;
       canvas.style.cursor = 'grab';
       if (mouseDownPos && started) {
@@ -880,6 +839,11 @@ if (k === '4') {
     camera.updateProjectionMatrix();
   }
 
+  function toggleScope() {
+    scoping = !scoping;
+    scopeEl.style.display = scoping ? 'block' : 'none';
+  }
+
   function buildBoss() {
     const group = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: bossType.color, emissive: bossType.emissive, emissiveIntensity: 0.35, roughness: 0.5 });
@@ -1187,6 +1151,15 @@ if (k === '4') {
     gunKick = 1;
   }
 
+  const WEAPON_ICONS = { bullet: '🔫', missile: '🎯', blast: '💥' };
+  const WEAPON_KEYS = { bullet: '1', missile: '2', blast: '3' };
+  function switchWeapon(w) {
+    if (currentWeapon === w) return;
+    currentWeapon = w;
+    weaponEl.textContent = WEAPON_ICONS[w] + ' Weapon: ' + WEAPON_LABELS[w] + ' (' + WEAPON_KEYS[w] + ')';
+    msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
+  }
+
   function updateBullets(dt) {
     const now = performance.now() / 1000;
     for (let i = bullets.length - 1; i >= 0; i--) {
@@ -1325,6 +1298,7 @@ if (k === '4') {
         b.lastPuff = now;
       }
       if (dist < 1.6) {
+        const impactPos = b.mesh.position.clone();
         if (b.target.kind === 'boss') {
           bossHp = Math.max(0, bossHp - b.dmg);
           pendingBossDamage += b.dmg;
@@ -1336,6 +1310,7 @@ if (k === '4') {
             updateBossHud();
             msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
           }
+          if (b.blast) explodeSplash(impactPos, b.dmg, true, null);
         } else {
           const e = b.target.ref;
           e.hp = Math.max(0, e.hp - b.dmg);
@@ -1348,6 +1323,7 @@ if (k === '4') {
               lockedTarget = null; lockRing.visible = false;
             }
           }
+          if (b.blast) explodeSplash(impactPos, b.dmg, false, e);
         }
         scene.remove(b.mesh);
         activeBolts.splice(i, 1);
@@ -1575,6 +1551,8 @@ if (k === '4') {
     updateEnemies(dt);
     updateEnemyBolts(dt);
     updateFreeBolts(dt);
+    updateBullets(dt);
+    updateExplosions(dt);
     updateTrailPuffs(dt);
     updateHealthPacks(dt);
     updateShield(dt);
