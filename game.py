@@ -244,7 +244,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · move mouse to look · E to fire where you're aiming · click an enemy to lock on, then click/E to fire homing shots · green crosses heal you
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire where you're aiming · click an enemy to lock on, then click/E to fire homing shots · green crosses heal you
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -298,8 +298,7 @@ GAME_HTML = r"""
   let healthPacks = [];
   let raceGates = [], raceActive = false, raceStart = 0, raceCheckpoint = 0, bestTime = null;
   let yaw = 0, pitch = 0.28;
-  let hovering = false;
-  let lastMouseX = 0, lastMouseY = 0, haveLastMouse = false;
+  let dragging = false, lastMouseX = 0, lastMouseY = 0;
   let flying = false;
 
   let myHp = INIT.myHp || 100;
@@ -437,15 +436,19 @@ GAME_HTML = r"""
     window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
     window.addEventListener('resize', onResize);
 
-    canvas.style.cursor = 'crosshair';
-    canvas.addEventListener('mouseenter', () => { hovering = true; haveLastMouse = false; });
-    canvas.addEventListener('mouseleave', () => { hovering = false; haveLastMouse = false; });
+    canvas.style.cursor = 'grab';
     canvas.addEventListener('mousedown', e => {
       if (!started) return;
+      dragging = true;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
       mouseDownPos = { x: e.clientX, y: e.clientY };
       mouseDownTime = performance.now();
+      canvas.style.cursor = 'grabbing';
     });
     window.addEventListener('mouseup', e => {
+      dragging = false;
+      canvas.style.cursor = 'grab';
       if (mouseDownPos && started) {
         const moved = Math.hypot(e.clientX - mouseDownPos.x, e.clientY - mouseDownPos.y);
         const elapsed = performance.now() - mouseDownTime;
@@ -454,13 +457,7 @@ GAME_HTML = r"""
       mouseDownPos = null;
     });
     window.addEventListener('mousemove', e => {
-      if (!hovering || !started) { haveLastMouse = false; return; }
-      if (!haveLastMouse) {
-        lastMouseX = e.clientX;
-        lastMouseY = e.clientY;
-        haveLastMouse = true;
-        return;
-      }
+      if (!dragging) return;
       const dx = e.clientX - lastMouseX;
       const dy = e.clientY - lastMouseY;
       lastMouseX = e.clientX;
