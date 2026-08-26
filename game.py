@@ -486,6 +486,25 @@ GAME_HTML = r"""
       if (!keys[k]) {
         if (k === 'c') thirdPerson = !thirdPerson;
         if (k === 'f') { flying = !flying; playerVel.set(0,0,0); msgEl.textContent = flying ? 'Flying enabled — W/S move along your view, SPACE/SHIFT for extra up/down.' : 'Flying disabled — gravity is back on.'; }
+        if (k === '1') {
+  currentWeapon = 'bullet';
+  msgEl.textContent = '🔫 RAPID BULLETS equipped';
+}
+
+if (k === '2') {
+  currentWeapon = 'missile';
+  msgEl.textContent = '🚀 RAPID TARGET MISSILES equipped';
+}
+
+if (k === '3') {
+  currentWeapon = 'blast';
+  msgEl.textContent = '💥 RAPID BLAST MISSILES equipped';
+}
+
+if (k === '4') {
+  currentWeapon = 'plasma';
+  msgEl.textContent = '⚡ PLASMA equipped';
+}
         if (k === 'e') fireBolt();
         if (k === 'q') activateShield();
       }
