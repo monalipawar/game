@@ -265,7 +265,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire (hold for rapid fire) · 1 bullets · 2 target missiles · 3 blast missiles · 4 toggles rapid fire · right-click toggles scope · green crosses heal you
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire (hold for rapid fire) · 1 bullets · 2 target missiles · 3 blast missiles · 4 toggles rapid fire · right-click toggles scope, then click to lock & fire missiles/blasts · green crosses heal you
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -360,6 +360,7 @@ GAME_HTML = r"""
   let lockRing = null;
   let activeBolts = [];
   let mouseDownPos = null, mouseDownTime = 0;
+  let leftMouseHeld = false;
   let lastHitFlash = 0;
   let gunGroup = null, gunMuzzle = null, gunBasePos = null, gunKick = 0;
   let freeBolts = [];
@@ -491,6 +492,7 @@ GAME_HTML = r"""
         toggleScope();
         return;
       }
+      leftMouseHeld = true;
       dragging = true;
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
@@ -500,12 +502,23 @@ GAME_HTML = r"""
     });
     window.addEventListener('mouseup', e => {
       if (e.button === 2) return;
+      leftMouseHeld = false;
       dragging = false;
       canvas.style.cursor = 'grab';
       if (mouseDownPos && started) {
         const moved = Math.hypot(e.clientX - mouseDownPos.x, e.clientY - mouseDownPos.y);
         const elapsed = performance.now() - mouseDownTime;
-        if (moved < 6 && elapsed < 350) tryLockTarget(e.clientX, e.clientY);
+        if (moved < 6 && elapsed < 350) {
+          if (scoping && (currentWeapon === 'missile' || currentWeapon === 'blast')) {
+            // Scoped in with a missile weapon selected: left-click both locks whatever is
+            // under the reticle (if anything) and fires immediately, so scoping doubles as
+            // the trigger for the two missile weapons.
+            tryLockTarget(e.clientX, e.clientY);
+            fireBolt();
+          } else {
+            tryLockTarget(e.clientX, e.clientY);
+          }
+        }
       }
       mouseDownPos = null;
     });
@@ -1572,6 +1585,7 @@ GAME_HTML = r"""
     updateGunViewmodel(dt);
     updateScope(dt);
     if (rapidFire && keys['e'] && started) fireBolt();
+    if (rapidFire && scoping && leftMouseHeld && started && (currentWeapon === 'missile' || currentWeapon === 'blast')) fireBolt();
     if (lockRing && lockedTarget) {
       const tm = targetMesh(lockedTarget);
       if (tm) {
