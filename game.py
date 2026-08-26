@@ -358,6 +358,17 @@ GAME_HTML = r"""
   let gunGroup = null, gunMuzzle = null, gunBasePos = null, gunKick = 0;
   let freeBolts = [];
   let trailPuffs = [];
+  let explosions = [];
+  let bullets = [];
+  let currentWeapon = 'missile'; // 'bullet' | 'missile' | 'blast'
+  const WEAPON_LABELS = { bullet: 'Bullets', missile: 'Target Missiles', blast: 'Blast Missiles' };
+  const BULLET_COOLDOWN = 0.18;
+  const BULLET_SPEED = 220;
+  const BULLET_LIFETIME = 1.4;
+  const BULLET_BOSS_RADIUS = 2.6;
+  const BULLET_ENEMY_RADIUS = 1.5;
+  const BLAST_COOLDOWN = 1.4;
+  const BLAST_RADIUS = 7;
   const FREE_BOLT_SPEED = 70;
   const FREE_BOLT_LIFETIME = 8;
   const FREE_BOLT_BOSS_RADIUS = 2.6;
@@ -911,37 +922,95 @@ GAME_HTML = r"""
     return t.ref.alive ? t.ref.mesh : null;
   }
 
-  function makeMissile(color) {
+  function makeMissile(color, isBlast) {
+    const s = isBlast ? 1.5 : 1;
     const group = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8d8e0, metalness: 0.6, roughness: 0.3 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color: isBlast ? 0x3a2018 : 0xd8d8e0, metalness: 0.6, roughness: 0.3 });
     const noseMat = new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.9 });
-    const finMat = new THREE.MeshStandardMaterial({ color: 0x555566, metalness: 0.5, roughness: 0.4 });
+    const finMat = new THREE.MeshStandardMaterial({ color: isBlast ? 0x7a3320 : 0x555566, metalness: 0.5, roughness: 0.4 });
     const flameMat = new THREE.MeshStandardMaterial({ color: 0xffaa33, emissive: 0xff6600, emissiveIntensity: 1.6, transparent: true, opacity: 0.9 });
 
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.9, 10), bodyMat);
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.14 * s, 0.14 * s, 0.9 * s, 10), bodyMat);
     body.rotation.x = Math.PI / 2;
     group.add(body);
 
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.4, 10), noseMat);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.14 * s, 0.4 * s, 10), noseMat);
     nose.rotation.x = Math.PI / 2;
-    nose.position.set(0, 0, -0.65);
+    nose.position.set(0, 0, -0.65 * s);
     group.add(nose);
 
     for (let i = 0; i < 4; i++) {
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.03, 0.22), finMat);
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.32 * s, 0.03 * s, 0.22 * s), finMat);
       const a = (i / 4) * Math.PI * 2;
-      fin.position.set(Math.cos(a) * 0.12, Math.sin(a) * 0.12, 0.35);
+      fin.position.set(Math.cos(a) * 0.12 * s, Math.sin(a) * 0.12 * s, 0.35 * s);
       fin.rotation.z = a;
       group.add(fin);
     }
 
-    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.5, 8), flameMat);
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.13 * s, 0.5 * s, 8), flameMat);
     flame.rotation.x = -Math.PI / 2;
-    flame.position.set(0, 0, 0.6);
+    flame.position.set(0, 0, 0.6 * s);
     group.add(flame);
     group.userData.flame = flame;
 
     return group;
+  }
+
+  function spawnExplosion(pos, radius) {
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffaa33, emissive: 0xff5522, emissiveIntensity: 1.8, transparent: true, opacity: 0.85 });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 14), mat);
+    mesh.position.copy(pos);
+    scene.add(mesh);
+    explosions.push({ mesh, born: performance.now() / 1000, maxR: radius });
+  }
+
+  function updateExplosions(dt) {
+    const now = performance.now() / 1000;
+    for (let i = explosions.length - 1; i >= 0; i--) {
+      const ex = explosions[i];
+      const age = now - ex.born;
+      const dur = 0.4;
+      if (age > dur) {
+        scene.remove(ex.mesh);
+        explosions.splice(i, 1);
+        continue;
+      }
+      const t = age / dur;
+      const scale = 0.3 + ex.maxR * t;
+      ex.mesh.scale.set(scale / 0.3, scale / 0.3, scale / 0.3);
+      ex.mesh.material.opacity = 0.85 * (1 - t);
+    }
+  }
+
+  function explodeSplash(pos, dmg, excludeBoss, excludeEnemy) {
+    spawnExplosion(pos, BLAST_RADIUS);
+    if (bossMesh && bossAlive && !excludeBoss && pos.distanceTo(bossMesh.position) < BLAST_RADIUS) {
+      bossHp = Math.max(0, bossHp - dmg);
+      pendingBossDamage += dmg;
+      flashMesh(bossMesh);
+      updateBossHud();
+      if (bossHp <= 0) {
+        bossAlive = false;
+        if (lockedTarget && lockedTarget.kind === 'boss') { lockedTarget = null; lockRing.visible = false; }
+        updateBossHud();
+        msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
+      }
+    }
+    enemies.forEach(e => {
+      if (!e.alive || e === excludeEnemy) return;
+      if (pos.distanceTo(e.mesh.position) < BLAST_RADIUS) {
+        e.hp = Math.max(0, e.hp - dmg);
+        flashMesh(e.mesh);
+        if (e.hp <= 0) {
+          e.alive = false;
+          e.deadAt = performance.now() / 1000;
+          e.mesh.visible = false;
+          if (lockedTarget && lockedTarget.kind === 'enemy' && lockedTarget.ref === e) {
+            lockedTarget = null; lockRing.visible = false;
+          }
+        }
+      }
+    });
   }
 
   function orientMissile(mesh, dir) {
@@ -1006,7 +1075,16 @@ GAME_HTML = r"""
   function fireBolt() {
     if (!started) return;
     const now = performance.now() / 1000;
+
+    if (currentWeapon === 'bullet') {
+      if (now - lastAttack < BULLET_COOLDOWN) return;
+      fireBulletShot(now);
+      return;
+    }
+
     if (now - lastAttack < ATTACK_COOLDOWN) return;
+    const isBlast = currentWeapon === 'blast';
+    if (isBlast && now - lastAttack < BLAST_COOLDOWN) return;
 
     const target = lockedTarget || autoAcquireTarget();
 
@@ -1017,12 +1095,13 @@ GAME_HTML = r"""
       } else {
         lastAttack = now;
         recoil();
-        const boltColor = target.kind === 'boss' ? bossType.boltColor : 0x7cf7ff;
-        const bolt = makeMissile(boltColor);
+        const boltColor = isBlast ? 0xff8844 : (target.kind === 'boss' ? bossType.boltColor : 0x7cf7ff);
+        const bolt = makeMissile(boltColor, isBlast);
         bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
         scene.add(bolt);
-        const dmg = target.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10));
-        activeBolts.push({ mesh: bolt, dmg, target: target, lastPuff: now });
+        const dmg = isBlast ? (26 + Math.floor(Math.random() * 14)) :
+          (target.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10)));
+        activeBolts.push({ mesh: bolt, dmg, target: target, lastPuff: now, blast: isBlast });
         return;
       }
     }
@@ -1035,31 +1114,43 @@ GAME_HTML = r"""
     camera.getWorldDirection(dir);
     const muzzlePos = new THREE.Vector3();
     gunMuzzle.getWorldPosition(muzzlePos);
-    const bolt = makeMissile(0x7cf7ff);
+    const bolt = makeMissile(isBlast ? 0xff8844 : 0x7cf7ff, isBlast);
     bolt.position.copy(muzzlePos);
     orientMissile(bolt, dir);
     scene.add(bolt);
-    const dmg = 10 + Math.floor(Math.random() * 9);
-    freeBolts.push({ mesh: bolt, dir: dir.clone(), dmg, born: now, lastPuff: now });
+    const dmg = isBlast ? (26 + Math.floor(Math.random() * 14)) : (10 + Math.floor(Math.random() * 9));
+    freeBolts.push({ mesh: bolt, dir: dir.clone(), dmg, born: now, lastPuff: now, blast: isBlast });
+  }
+
+  function fireBulletShot(now) {
+    lastAttack = now;
+    recoil();
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    const muzzlePos = new THREE.Vector3();
+    gunMuzzle.getWorldPosition(muzzlePos);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xfff2b0, emissive: 0xffcc55, emissiveIntensity: 1.6 });
+    const bullet = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 6), mat);
+    bullet.rotation.x = Math.PI / 2;
+    bullet.position.copy(muzzlePos);
+    orientMissile(bullet, dir);
+    scene.add(bullet);
+    const dmg = 5 + Math.floor(Math.random() * 5);
+    bullets.push({ mesh: bullet, dir: dir.clone(), dmg, born: now });
   }
 
   function recoil() {
     gunKick = 1;
   }
 
-  function updateFreeBolts(dt) {
+  function updateBullets(dt) {
     const now = performance.now() / 1000;
-    for (let i = freeBolts.length - 1; i >= 0; i--) {
-      const b = freeBolts[i];
-      b.mesh.position.addScaledVector(b.dir, FREE_BOLT_SPEED * dt);
-
-      if (now - b.lastPuff > 0.04) {
-        spawnTrailPuff(b.mesh.position.clone().addScaledVector(b.dir, 0.4));
-        b.lastPuff = now;
-      }
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i];
+      b.mesh.position.addScaledVector(b.dir, BULLET_SPEED * dt);
 
       let hit = false;
-      if (bossMesh && bossAlive && b.mesh.position.distanceTo(bossMesh.position) < FREE_BOLT_BOSS_RADIUS) {
+      if (bossMesh && bossAlive && b.mesh.position.distanceTo(bossMesh.position) < BULLET_BOSS_RADIUS) {
         bossHp = Math.max(0, bossHp - b.dmg);
         pendingBossDamage += b.dmg;
         flashMesh(bossMesh);
@@ -1075,7 +1166,7 @@ GAME_HTML = r"""
       if (!hit) {
         for (const e of enemies) {
           if (!e.alive) continue;
-          if (b.mesh.position.distanceTo(e.mesh.position) < FREE_BOLT_ENEMY_RADIUS) {
+          if (b.mesh.position.distanceTo(e.mesh.position) < BULLET_ENEMY_RADIUS) {
             e.hp = Math.max(0, e.hp - b.dmg);
             flashMesh(e.mesh);
             if (e.hp <= 0) {
@@ -1092,12 +1183,88 @@ GAME_HTML = r"""
         }
       }
 
+      if (hit || now - b.born > BULLET_LIFETIME) {
+        scene.remove(b.mesh);
+        bullets.splice(i, 1);
+      }
+    }
+  }
+
+  function updateFreeBolts(dt) {
+    const now = performance.now() / 1000;
+    for (let i = freeBolts.length - 1; i >= 0; i--) {
+      const b = freeBolts[i];
+      b.mesh.position.addScaledVector(b.dir, FREE_BOLT_SPEED * dt);
+
+      if (now - b.lastPuff > 0.04) {
+        spawnTrailPuff(b.mesh.position.clone().addScaledVector(b.dir, 0.4));
+        b.lastPuff = now;
+      }
+
+      let hit = false;
+      let hitEnemyRef = null;
+      let impactPos = null;
+      if (bossMesh && bossAlive && b.mesh.position.distanceTo(bossMesh.position) < FREE_BOLT_BOSS_RADIUS) {
+        impactPos = b.mesh.position.clone();
+        if (!b.blast) {
+          bossHp = Math.max(0, bossHp - b.dmg);
+          pendingBossDamage += b.dmg;
+          flashMesh(bossMesh);
+          updateBossHud();
+          if (bossHp <= 0) {
+            bossAlive = false;
+            if (lockedTarget && lockedTarget.kind === 'boss') { lockedTarget = null; lockRing.visible = false; }
+            updateBossHud();
+            msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
+          }
+        } else {
+          explodeSplash(impactPos, b.dmg, false, null);
+        }
+        hit = true;
+      }
+      if (!hit) {
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          if (b.mesh.position.distanceTo(e.mesh.position) < FREE_BOLT_ENEMY_RADIUS) {
+            impactPos = b.mesh.position.clone();
+            if (!b.blast) {
+              e.hp = Math.max(0, e.hp - b.dmg);
+              flashMesh(e.mesh);
+              if (e.hp <= 0) {
+                e.alive = false;
+                e.deadAt = now;
+                e.mesh.visible = false;
+                if (lockedTarget && lockedTarget.kind === 'enemy' && lockedTarget.ref === e) {
+                  lockedTarget = null; lockRing.visible = false;
+                }
+              }
+            } else {
+              e.hp = Math.max(0, e.hp - b.dmg);
+              flashMesh(e.mesh);
+              if (e.hp <= 0) {
+                e.alive = false;
+                e.deadAt = now;
+                e.mesh.visible = false;
+                if (lockedTarget && lockedTarget.kind === 'enemy' && lockedTarget.ref === e) {
+                  lockedTarget = null; lockRing.visible = false;
+                }
+              }
+              explodeSplash(impactPos, b.dmg, false, e);
+            }
+            hitEnemyRef = e;
+            hit = true;
+            break;
+          }
+        }
+      }
+
       if (hit || now - b.born > FREE_BOLT_LIFETIME) {
         scene.remove(b.mesh);
         freeBolts.splice(i, 1);
       }
     }
   }
+
 
   function updateBolts(dt) {
     const now = performance.now() / 1000;
