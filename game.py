@@ -244,7 +244,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · click to lock target, click/E to fire · green crosses heal you
+      WASD/arrows move · SPACE jump · F fly · C camera · move mouse to look · E to fire where you're aiming · click an enemy to lock on, then click/E to fire homing shots · green crosses heal you
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -253,10 +253,11 @@ GAME_HTML = r"""
     <div style="font-size:2rem; font-weight:800; background:linear-gradient(90deg,#7cf7ff,#a78bfa,#f472b6);
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px;">OrbitDrift</div>
     <div style="max-width:440px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
-      Explore a huge archipelago with other drifters, lock onto and fire homing bolts at a cycling
-      rotation of three bosses plus scattered island enemies — some just sit there as target
-      practice, some shoot back, and some will chase you down. Race checkpoint gates, and chat
-      below the scene. Everyone in this room shares the same boss health.
+      Explore a huge archipelago with other drifters. Fire freely wherever you're aiming with E,
+      or click an enemy to lock on for homing shots, against a cycling rotation of three bosses
+      plus scattered island enemies — some just sit there as target practice, some shoot back,
+      and some will chase you down. Race checkpoint gates, and chat below the scene. Everyone in
+      this room shares the same boss health.
     </div>
     <button id="od-startbtn" style="padding:14px 34px; border-radius:14px; border:none; cursor:pointer;
         font-family:'Outfit',sans-serif; font-weight:600; font-size:1.05rem; color:#04030d;
@@ -297,7 +298,8 @@ GAME_HTML = r"""
   let healthPacks = [];
   let raceGates = [], raceActive = false, raceStart = 0, raceCheckpoint = 0, bestTime = null;
   let yaw = 0, pitch = 0.28;
-  let dragging = false, lastMouseX = 0, lastMouseY = 0;
+  let hovering = false;
+  let lastMouseX = 0, lastMouseY = 0, haveLastMouse = false;
   let flying = false;
 
   let myHp = INIT.myHp || 100;
@@ -332,6 +334,12 @@ GAME_HTML = r"""
   let activeBolts = [];
   let mouseDownPos = null, mouseDownTime = 0;
   let lastHitFlash = 0;
+  let gunGroup = null, gunMuzzle = null, gunBasePos = null, gunKick = 0;
+  let freeBolts = [];
+  const FREE_BOLT_SPEED = 90;
+  const FREE_BOLT_LIFETIME = 2.2;
+  const FREE_BOLT_BOSS_RADIUS = 2.6;
+  const FREE_BOLT_ENEMY_RADIUS = 1.5;
 
   const GRAVITY = -24;
   const MOVE_SPEED = 20;
@@ -362,6 +370,8 @@ GAME_HTML = r"""
     camera.position.set(0, 9, 12);
     camera.lookAt(0, 6, 0);
     yaw = 0; pitch = 0.28;
+    scene.add(camera);
+    buildGunViewmodel();
 
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
     renderer.setSize(w0, h0, false);
@@ -427,19 +437,15 @@ GAME_HTML = r"""
     window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
     window.addEventListener('resize', onResize);
 
-    canvas.style.cursor = 'grab';
+    canvas.style.cursor = 'crosshair';
+    canvas.addEventListener('mouseenter', () => { hovering = true; haveLastMouse = false; });
+    canvas.addEventListener('mouseleave', () => { hovering = false; haveLastMouse = false; });
     canvas.addEventListener('mousedown', e => {
       if (!started) return;
-      dragging = true;
-      lastMouseX = e.clientX;
-      lastMouseY = e.clientY;
       mouseDownPos = { x: e.clientX, y: e.clientY };
       mouseDownTime = performance.now();
-      canvas.style.cursor = 'grabbing';
     });
     window.addEventListener('mouseup', e => {
-      dragging = false;
-      canvas.style.cursor = 'grab';
       if (mouseDownPos && started) {
         const moved = Math.hypot(e.clientX - mouseDownPos.x, e.clientY - mouseDownPos.y);
         const elapsed = performance.now() - mouseDownTime;
@@ -448,7 +454,13 @@ GAME_HTML = r"""
       mouseDownPos = null;
     });
     window.addEventListener('mousemove', e => {
-      if (!dragging) return;
+      if (!hovering || !started) { haveLastMouse = false; return; }
+      if (!haveLastMouse) {
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        haveLastMouse = true;
+        return;
+      }
       const dx = e.clientX - lastMouseX;
       const dy = e.clientY - lastMouseY;
       lastMouseX = e.clientX;
@@ -719,6 +731,62 @@ GAME_HTML = r"""
       b.mesh.position.addScaledVector(dir, 28 * dt);
     }
   }
+  function buildGunViewmodel() {
+    const group = new THREE.Group();
+    const metal = new THREE.MeshStandardMaterial({ color: 0x2a2f45, metalness: 0.7, roughness: 0.35 });
+    const accent = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x2dd4bf, emissiveIntensity: 0.9, metalness: 0.4, roughness: 0.3 });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.55), metal);
+    body.position.set(0, 0, -0.1);
+    group.add(body);
+
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.4, 10), metal);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 0.01, -0.55);
+    group.add(barrel);
+
+    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.08, 10), accent);
+    tip.rotation.x = Math.PI / 2;
+    tip.position.set(0, 0.01, -0.76);
+    group.add(tip);
+
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.28, 0.12), metal);
+    grip.position.set(0, -0.18, 0.12);
+    grip.rotation.x = 0.25;
+    group.add(grip);
+
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.03, 0.2), accent);
+    stripe.position.set(0, 0.06, -0.05);
+    group.add(stripe);
+
+    gunBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
+    group.position.copy(gunBasePos);
+    group.rotation.y = -0.05;
+    camera.add(group);
+    gunGroup = group;
+
+    gunMuzzle = new THREE.Object3D();
+    gunMuzzle.position.set(0, 0.01, -0.8);
+    group.add(gunMuzzle);
+  }
+
+  function updateGunViewmodel(dt) {
+    if (!gunGroup) return;
+    const now = performance.now() / 1000;
+    const moving = (keys['w']||keys['a']||keys['s']||keys['d']||keys['arrowup']||keys['arrowdown']||keys['arrowleft']||keys['arrowright']) && onGround;
+    const bobX = moving ? Math.sin(now * 9) * 0.012 : Math.sin(now * 1.6) * 0.003;
+    const bobY = moving ? Math.abs(Math.sin(now * 9)) * 0.012 : Math.sin(now * 1.4) * 0.0025;
+    if (gunKick > 0) {
+      gunKick = Math.max(0, gunKick - dt * 6);
+    }
+    gunGroup.position.set(
+      gunBasePos.x + bobX,
+      gunBasePos.y + bobY,
+      gunBasePos.z + gunKick * 0.18
+    );
+    gunGroup.visible = started;
+  }
+
   function buildBoss() {
     const group = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: bossType.color, emissive: bossType.emissive, emissiveIntensity: 0.35, roughness: 0.5 });
@@ -806,23 +874,94 @@ GAME_HTML = r"""
   }
 
   function fireBolt() {
-    if (!started || !lockedTarget) return;
-    const mesh = targetMesh(lockedTarget);
-    if (!mesh) { lockedTarget = null; lockRing.visible = false; return; }
+    if (!started) return;
     const now = performance.now() / 1000;
     if (now - lastAttack < ATTACK_COOLDOWN) return;
-    if (player.position.distanceTo(mesh.position) > ATTACK_RANGE) {
-      msgEl.textContent = 'Too far to fire — close the distance first.';
+
+    if (lockedTarget) {
+      const mesh = targetMesh(lockedTarget);
+      if (!mesh) { lockedTarget = null; lockRing.visible = false; return; }
+      if (player.position.distanceTo(mesh.position) > ATTACK_RANGE) {
+        msgEl.textContent = 'Too far to fire — close the distance first.';
+        return;
+      }
+      lastAttack = now;
+      recoil();
+      const boltColor = lockedTarget.kind === 'boss' ? bossType.boltColor : 0x7cf7ff;
+      const boltMat = new THREE.MeshStandardMaterial({ color: boltColor, emissive: boltColor, emissiveIntensity: 1.2 });
+      const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 10), boltMat);
+      bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
+      scene.add(bolt);
+      const dmg = lockedTarget.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10));
+      activeBolts.push({ mesh: bolt, dmg, target: lockedTarget });
       return;
     }
+
+    // Free-aim shot: fires straight from the gun muzzle along the camera's look direction,
+    // no lock-on required. Hits whatever it travels into (boss or enemy).
     lastAttack = now;
-    const boltColor = lockedTarget.kind === 'boss' ? bossType.boltColor : 0x7cf7ff;
-    const boltMat = new THREE.MeshStandardMaterial({ color: boltColor, emissive: boltColor, emissiveIntensity: 1.2 });
-    const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 10), boltMat);
-    bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
+    recoil();
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    const muzzlePos = new THREE.Vector3();
+    gunMuzzle.getWorldPosition(muzzlePos);
+    const boltMat = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x7cf7ff, emissiveIntensity: 1.3 });
+    const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), boltMat);
+    bolt.position.copy(muzzlePos);
     scene.add(bolt);
-    const dmg = lockedTarget.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10));
-    activeBolts.push({ mesh: bolt, dmg, target: lockedTarget });
+    const dmg = 10 + Math.floor(Math.random() * 9);
+    freeBolts.push({ mesh: bolt, dir: dir.clone(), dmg, born: now });
+  }
+
+  function recoil() {
+    gunKick = 1;
+  }
+
+  function updateFreeBolts(dt) {
+    const now = performance.now() / 1000;
+    for (let i = freeBolts.length - 1; i >= 0; i--) {
+      const b = freeBolts[i];
+      b.mesh.position.addScaledVector(b.dir, FREE_BOLT_SPEED * dt);
+
+      let hit = false;
+      if (bossMesh && bossAlive && b.mesh.position.distanceTo(bossMesh.position) < FREE_BOLT_BOSS_RADIUS) {
+        bossHp = Math.max(0, bossHp - b.dmg);
+        pendingBossDamage += b.dmg;
+        flashMesh(bossMesh);
+        updateBossHud();
+        if (bossHp <= 0) {
+          bossAlive = false;
+          if (lockedTarget && lockedTarget.kind === 'boss') { lockedTarget = null; lockRing.visible = false; }
+          updateBossHud();
+          msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
+        }
+        hit = true;
+      }
+      if (!hit) {
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          if (b.mesh.position.distanceTo(e.mesh.position) < FREE_BOLT_ENEMY_RADIUS) {
+            e.hp = Math.max(0, e.hp - b.dmg);
+            flashMesh(e.mesh);
+            if (e.hp <= 0) {
+              e.alive = false;
+              e.deadAt = now;
+              e.mesh.visible = false;
+              if (lockedTarget && lockedTarget.kind === 'enemy' && lockedTarget.ref === e) {
+                lockedTarget = null; lockRing.visible = false;
+              }
+            }
+            hit = true;
+            break;
+          }
+        }
+      }
+
+      if (hit || now - b.born > FREE_BOLT_LIFETIME) {
+        scene.remove(b.mesh);
+        freeBolts.splice(i, 1);
+      }
+    }
   }
 
   function updateBolts(dt) {
@@ -1083,7 +1222,10 @@ GAME_HTML = r"""
     updateBolts(dt);
     updateEnemies(dt);
     updateEnemyBolts(dt);
+    updateFreeBolts(dt);
     updateHealthPacks(dt);
+    updateShield(dt);
+    updateGunViewmodel(dt);
     if (lockRing && lockedTarget) {
       const tm = targetMesh(lockedTarget);
       if (tm) {
