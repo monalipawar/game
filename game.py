@@ -287,8 +287,29 @@ GAME_HTML = r"""
       <line x1="8%" y1="50%" x2="38%" y2="50%" stroke="#0a0a0a" stroke-width="2"/>
       <line x1="62%" y1="50%" x2="92%" y2="50%" stroke="#0a0a0a" stroke-width="2"/>
       <circle cx="50%" cy="50%" r="2.5" fill="#f472b6"/>
-    </svg>
-  </div>
+     </svg>
+
+  <button id="od-auto-aim"
+    style="
+      position:absolute;
+      top:20px;
+      left:50%;
+      transform:translateX(-50%);
+      z-index:20;
+      padding:8px 16px;
+      border-radius:10px;
+      border:1px solid rgba(124,247,255,0.35);
+      background:rgba(255,255,255,0.08);
+      color:#e8e6ff;
+      font-family:'Outfit',sans-serif;
+      font-weight:600;
+      cursor:pointer;
+      pointer-events:auto;
+    ">
+    AUTO AIM: OFF
+  </button>
+
+</div>
 
   <div id="od-msg" style="position:absolute; bottom:16px; left:50%; transform:translateX(-50%); z-index:5;
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
@@ -405,6 +426,7 @@ GAME_HTML = r"""
   let bullets = [];
   let currentWeapon = 'missile'; // 'bullet' | 'missile' | 'blast'
   let rapidFire = false;
+  let autoAim = false;
   const RAPID_MULT = 0.32;
   const WEAPON_LABELS = { bullet: 'Bullets', missile: 'Target Missiles', blast: 'Blast Missiles' };
   const BULLET_COOLDOWN = 0.18;
@@ -885,6 +907,21 @@ GAME_HTML = r"""
   function toggleScope() {
     scoping = !scoping;
     scopeEl.style.display = scoping ? 'block' : 'none';
+    const autoAimBtn = document.getElementById('od-auto-aim');
+
+autoAimBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+
+  autoAim = !autoAim;
+
+  autoAimBtn.textContent = autoAim
+    ? 'AUTO AIM: ON'
+    : 'AUTO AIM: OFF';
+
+  autoAimBtn.style.background = autoAim
+    ? 'rgba(80,220,120,0.25)'
+    : 'rgba(255,255,255,0.08)';
+});
   }
 
   function buildBosses() {
@@ -1211,8 +1248,8 @@ GAME_HTML = r"""
     const cooldown = isBlast ? BLAST_COOLDOWN : ATTACK_COOLDOWN;
     if (now - lastAttack < cooldown * mult) return;
 
-    const target = lockedTarget || autoAcquireTarget();
-
+    const target = lockedTarget || (autoAim ? autoAcquireTarget() : null);
+    
     if (target) {
       const mesh = targetMesh(target);
       if (!mesh) {
