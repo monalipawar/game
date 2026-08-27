@@ -1213,6 +1213,18 @@ autoAimBtn.addEventListener('click', (e) => {
     for (let i = 0; i < 3; i++) {
       if (bossMeshes[i] && bossAlive[i]) candidates.push({ kind: 'boss', index: i });
     }
+    function updateAimDot() {
+  const dot = document.getElementById('od-aim-dot');
+  if (!dot) return;
+
+  const target = autoAcquireTarget();
+
+  if (target) {
+    dot.setAttribute('fill', '#4ade80');
+  } else {
+    dot.setAttribute('fill', '#f472b6');
+  }
+}
     enemies.forEach(e => { if (e.alive) candidates.push({ kind: 'enemy', ref: e }); });
 
     let best = null, bestScore = -Infinity;
