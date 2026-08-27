@@ -286,30 +286,9 @@ GAME_HTML = r"""
       <line x1="50%" y1="62%" x2="50%" y2="92%" stroke="#0a0a0a" stroke-width="2"/>
       <line x1="8%" y1="50%" x2="38%" y2="50%" stroke="#0a0a0a" stroke-width="2"/>
       <line x1="62%" y1="50%" x2="92%" y2="50%" stroke="#0a0a0a" stroke-width="2"/>
-      <circle id="od-aim-dot" cx="50%" cy="50%" r="2.5" fill="#f472b6"/>
-     </svg>
-
-  <button id="od-auto-aim"
-    style="
-      position:absolute;
-      top:20px;
-      left:50%;
-      transform:translateX(-50%);
-      z-index:20;
-      padding:8px 16px;
-      border-radius:10px;
-      border:1px solid rgba(124,247,255,0.35);
-      background:rgba(255,255,255,0.08);
-      color:#e8e6ff;
-      font-family:'Outfit',sans-serif;
-      font-weight:600;
-      cursor:pointer;
-      pointer-events:auto;
-    ">
-    AUTO AIM: OFF
-  </button>
-
-</div>
+      <circle cx="50%" cy="50%" r="2.5" fill="#f472b6"/>
+    </svg>
+  </div>
 
   <div id="od-msg" style="position:absolute; bottom:16px; left:50%; transform:translateX(-50%); z-index:5;
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
@@ -324,13 +303,12 @@ GAME_HTML = r"""
     <div style="font-size:2rem; font-weight:800; background:linear-gradient(90deg,#7cf7ff,#a78bfa,#f472b6);
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px;">OrbitDrift</div>
     <div style="max-width:440px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
-      Explore a huge archipelago with other drifters. Switch between rapid-fire bullets,
-      auto-aiming target missiles, and area-damage blast missiles (keys 1/2/3) — press 4 to
-      toggle rapid fire on any of them and hold E to unload, and take on a cycling rotation of
-      three bosses plus scattered island enemies — some just sit there as target practice, some
-      shoot back, and some will chase you down. Right-click toggles a scope for precise aim.
-      Race checkpoint gates, and chat below the scene. Everyone in this room shares the same
-      boss health.
+      Explore a huge archipelago with other drifters. Walk the islands as your character, or
+      press F to hop into your ship and fly. Switch between rapid-fire bullets, auto-aiming
+      target missiles, and area-damage blast missiles (keys 1/2/3) — press 4 to toggle rapid
+      fire on any of them and hold E to unload, and take on 3 bosses at once who roam the map
+      and shoot back. Right-click toggles a scope for precise aim. Race checkpoint gates, and
+      chat below the scene. Everyone in this room shares the same boss fights.
     </div>
     <button id="od-startbtn" style="padding:14px 34px; border-radius:14px; border:none; cursor:pointer;
         font-family:'Outfit',sans-serif; font-weight:600; font-size:1.05rem; color:#04030d;
@@ -364,6 +342,7 @@ GAME_HTML = r"""
 
   let scene, camera, renderer, clock;
   let player, playerVel = new THREE.Vector3();
+  let humanVisual = null, shipVisual = null;
   let onGround = false;
   let thirdPerson = true;
   let started = false;
@@ -426,7 +405,6 @@ GAME_HTML = r"""
   let bullets = [];
   let currentWeapon = 'missile'; // 'bullet' | 'missile' | 'blast'
   let rapidFire = false;
-  let autoAim = false;
   const RAPID_MULT = 0.32;
   const WEAPON_LABELS = { bullet: 'Bullets', missile: 'Target Missiles', blast: 'Blast Missiles' };
   const BULLET_COOLDOWN = 0.18;
@@ -497,12 +475,14 @@ GAME_HTML = r"""
     const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.6, transparent: true, opacity: 0.7 });
     scene.add(new THREE.Points(starGeo, starMat));
 
-    const hasCapsule = typeof THREE.CapsuleGeometry === 'function';
-    const pGeo = hasCapsule ? new THREE.CapsuleGeometry(0.5, 1, 4, 8) : new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
-    const pMat = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x1a4a55, metalness: 0.3, roughness: 0.4 });
-    player = new THREE.Mesh(pGeo, pMat);
+    player = new THREE.Group();
     player.position.set(0, 6, 0);
     scene.add(player);
+    humanVisual = buildHumanCharacter();
+    shipVisual = buildSpaceship();
+    player.add(humanVisual);
+    player.add(shipVisual);
+    updatePlayerAppearance();
 
     const shieldGeo = new THREE.SphereGeometry(1.4, 16, 16);
     const shieldMat = new THREE.MeshStandardMaterial({
@@ -527,7 +507,7 @@ GAME_HTML = r"""
       const k = e.key.toLowerCase();
       if (!keys[k]) {
         if (k === 'c') thirdPerson = !thirdPerson;
-        if (k === 'f') { flying = !flying; playerVel.set(0,0,0); msgEl.textContent = flying ? 'Flying enabled — W/S move along your view, SPACE/SHIFT for extra up/down.' : 'Flying disabled — gravity is back on.'; }
+        if (k === 'f') { flying = !flying; playerVel.set(0,0,0); updatePlayerAppearance(); msgEl.textContent = flying ? 'Flying enabled — piloting your ship. W/S move along your view, SPACE/SHIFT for extra up/down.' : 'Flying disabled — back on foot, gravity is back on.'; }
         if (k === 'e') fireBolt();
         if (k === 'q') activateShield();
         if (k === '1') switchWeapon('bullet');
@@ -607,6 +587,119 @@ GAME_HTML = r"""
     scene.add(m);
     islands.push({ mesh: m, x, y: y + 0.6, z, r });
     return m;
+  }
+
+  function buildHumanCharacter() {
+    const group = new THREE.Group();
+    const suitMat = new THREE.MeshStandardMaterial({ color: 0x2a3a55, metalness: 0.3, roughness: 0.6 });
+    const accentMat = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x2dd4bf, emissiveIntensity: 0.6 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xe8b892, roughness: 0.7 });
+    const visorMat = new THREE.MeshStandardMaterial({ color: 0x0a2a33, emissive: 0x2dd4bf, emissiveIntensity: 0.8, metalness: 0.6, roughness: 0.2 });
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.32, 0.7, 4, 8) : new THREE.CylinderGeometry(0.32, 0.28, 1, 8), suitMat);
+    torso.position.set(0, 0.15, 0);
+    group.add(torso);
+
+    const belt = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.05, 6, 12), accentMat);
+    belt.position.set(0, -0.18, 0);
+    belt.rotation.x = Math.PI / 2;
+    group.add(belt);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 12), skinMat);
+    head.position.set(0, 0.68, 0);
+    group.add(head);
+
+    const visor = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 10), visorMat);
+    visor.position.set(0, 0.68, 0.15);
+    visor.scale.set(1, 0.7, 0.6);
+    group.add(visor);
+
+    const armGeo = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.09, 0.55, 4, 6) : new THREE.CylinderGeometry(0.09, 0.09, 0.7, 6);
+    const armL = new THREE.Mesh(armGeo, suitMat);
+    armL.position.set(-0.42, 0.1, 0);
+    armL.rotation.z = 0.18;
+    group.add(armL);
+    const armR = new THREE.Mesh(armGeo, suitMat);
+    armR.position.set(0.42, 0.1, 0);
+    armR.rotation.z = -0.18;
+    group.add(armR);
+
+    const legGeo = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.11, 0.6, 4, 6) : new THREE.CylinderGeometry(0.11, 0.11, 0.75, 6);
+    const legL = new THREE.Mesh(legGeo, suitMat);
+    legL.position.set(-0.15, -0.6, 0);
+    group.add(legL);
+    const legR = new THREE.Mesh(legGeo, suitMat);
+    legR.position.set(0.15, -0.6, 0);
+    group.add(legR);
+
+    const packGeo = new THREE.BoxGeometry(0.32, 0.4, 0.16);
+    const pack = new THREE.Mesh(packGeo, accentMat);
+    pack.position.set(0, 0.15, -0.24);
+    group.add(pack);
+
+    group.position.y = 0.75;
+    return group;
+  }
+
+  function buildSpaceship() {
+    const group = new THREE.Group();
+    const hullMat = new THREE.MeshStandardMaterial({ color: 0xd8dbe6, metalness: 0.65, roughness: 0.3 });
+    const accentMat = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x2dd4bf, emissiveIntensity: 0.7 });
+    const cockpitMat = new THREE.MeshStandardMaterial({ color: 0x1a2a44, emissive: 0x3388ff, emissiveIntensity: 0.5, metalness: 0.4, roughness: 0.15, transparent: true, opacity: 0.85 });
+    const engineMat = new THREE.MeshStandardMaterial({ color: 0xff8844, emissive: 0xff5511, emissiveIntensity: 1.4, transparent: true, opacity: 0.85 });
+
+    const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 1.7, 10), hullMat);
+    fuselage.rotation.x = Math.PI / 2;
+    group.add(fuselage);
+
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 10), hullMat);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.set(0, 0, -1.15);
+    group.add(nose);
+
+    const cockpit = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 12), cockpitMat);
+    cockpit.position.set(0, 0.18, -0.45);
+    cockpit.scale.set(1, 0.85, 1.3);
+    group.add(cockpit);
+
+    const wingGeo = new THREE.BoxGeometry(1.3, 0.06, 0.55);
+    const wingL = new THREE.Mesh(wingGeo, hullMat);
+    wingL.position.set(-0.75, -0.02, 0.25);
+    wingL.rotation.z = 0.06;
+    group.add(wingL);
+    const wingR = new THREE.Mesh(wingGeo, hullMat);
+    wingR.position.set(0.75, -0.02, 0.25);
+    wingR.rotation.z = -0.06;
+    group.add(wingR);
+
+    const finL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.32, 0.24), accentMat);
+    finL.position.set(-1.25, 0.14, 0.32);
+    group.add(finL);
+    const finR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.32, 0.24), accentMat);
+    finR.position.set(1.25, 0.14, 0.32);
+    group.add(finR);
+
+    const engineL = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.4, 8), engineMat);
+    engineL.rotation.x = -Math.PI / 2;
+    engineL.position.set(-0.3, -0.05, 0.95);
+    group.add(engineL);
+    const engineR = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.4, 8), engineMat);
+    engineR.rotation.x = -Math.PI / 2;
+    engineR.position.set(0.3, -0.05, 0.95);
+    group.add(engineR);
+
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.4), accentMat);
+    stripe.position.set(0, 0.28, -0.1);
+    group.add(stripe);
+
+    group.visible = false;
+    return group;
+  }
+
+  function updatePlayerAppearance() {
+    if (!humanVisual || !shipVisual) return;
+    humanVisual.visible = !flying;
+    shipVisual.visible = flying;
   }
 
   function buildIslands() {
@@ -907,21 +1000,6 @@ GAME_HTML = r"""
   function toggleScope() {
     scoping = !scoping;
     scopeEl.style.display = scoping ? 'block' : 'none';
-    const autoAimBtn = document.getElementById('od-auto-aim');
-
-autoAimBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-
-  autoAim = !autoAim;
-
-  autoAimBtn.textContent = autoAim
-    ? 'AUTO AIM: ON'
-    : 'AUTO AIM: OFF';
-
-  autoAimBtn.style.background = autoAim
-    ? 'rgba(80,220,120,0.25)'
-    : 'rgba(255,255,255,0.08)';
-});
   }
 
   function buildBosses() {
@@ -1213,18 +1291,6 @@ autoAimBtn.addEventListener('click', (e) => {
     for (let i = 0; i < 3; i++) {
       if (bossMeshes[i] && bossAlive[i]) candidates.push({ kind: 'boss', index: i });
     }
-    function updateAimDot() {
-  const dot = document.getElementById('od-aim-dot');
-  if (!dot) return;
-
-  const target = autoAcquireTarget();
-
-  if (target) {
-    dot.setAttribute('fill', '#4ade80');
-  } else {
-    dot.setAttribute('fill', '#f472b6');
-  }
-}
     enemies.forEach(e => { if (e.alive) candidates.push({ kind: 'enemy', ref: e }); });
 
     let best = null, bestScore = -Infinity;
@@ -1260,8 +1326,8 @@ autoAimBtn.addEventListener('click', (e) => {
     const cooldown = isBlast ? BLAST_COOLDOWN : ATTACK_COOLDOWN;
     if (now - lastAttack < cooldown * mult) return;
 
-    const target = lockedTarget || (autoAim ? autoAcquireTarget() : null);
-    
+    const target = lockedTarget || autoAcquireTarget();
+
     if (target) {
       const mesh = targetMesh(target);
       if (!mesh) {
@@ -1271,18 +1337,6 @@ autoAimBtn.addEventListener('click', (e) => {
         recoil();
         const boltColor = isBlast ? 0xff8844 : (target.kind === 'boss' ? bossTypeOf(target.index).boltColor : 0x7cf7ff);
         const bolt = makeMissile(boltColor, isBlast);
-
-// Fire exactly where the pink dot is pointing
-const aimDir = new THREE.Vector3();
-camera.getWorldDirection(aimDir);
-
-const muzzlePos = new THREE.Vector3();
-gunMuzzle.getWorldPosition(muzzlePos);
-
-bolt.position.copy(muzzlePos);
-orientMissile(bolt, aimDir);
-
-scene.add(bolt);
         bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
         scene.add(bolt);
         const dmg = isBlast ? (26 + Math.floor(Math.random() * 14)) :
