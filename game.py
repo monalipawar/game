@@ -230,6 +230,9 @@ GAME_HTML = r"""
     <div id="od-hp" style="margin-top:8px; font-size:0.85rem; color:#fb7185;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
         border:1px solid rgba(251,113,133,0.3);">❤ HP: 100</div>
+    <div id="od-safezone" style="display:none; margin-top:8px; font-size:0.85rem; color:#4ade80;
+        background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
+        border:1px solid rgba(74,222,128,0.4);">🏝 Safe Zone — no damage</div>
     <div id="od-shield" style="margin-top:8px; font-size:0.85rem; color:#7cf7ff;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
         border:1px solid rgba(124,247,255,0.3);">🛡 Shield: ready (Q)</div>
@@ -294,7 +297,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire (hold for rapid fire) · 1 bullets · 2 target missiles · 3 blast missiles · 4 toggles rapid fire · right-click toggles scope · green crosses heal you
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire (hold for rapid fire) · 1 bullets · 2 target missiles · 3 blast missiles · 4 toggles rapid fire · right-click toggles scope · green crosses heal you · islands are a safe zone
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -329,6 +332,7 @@ GAME_HTML = r"""
   const timerEl = document.getElementById('od-timer');
   const orbsEl = document.getElementById('od-orbs');
   const hpEl = document.getElementById('od-hp');
+  const safeZoneEl = document.getElementById('od-safezone');
   const shieldEl = document.getElementById('od-shield');
   const weaponEl = document.getElementById('od-weapon');
   const bestEl = document.getElementById('od-best');
@@ -344,6 +348,7 @@ GAME_HTML = r"""
   let player, playerVel = new THREE.Vector3();
   let humanVisual = null, shipVisual = null;
   let onGround = false;
+  let onIsland = false;
   let thirdPerson = true;
   let started = false;
   let keys = {};
@@ -903,6 +908,7 @@ GAME_HTML = r"""
   }
 
   function damagePlayer(dmg) {
+    if (onIsland) return; // islands are a safe zone — no damage while standing on one
     if (shieldActive) {
       shieldMesh.scale.set(1.25, 1.25, 1.25);
       setTimeout(() => { if (shieldMesh) shieldMesh.scale.set(1,1,1); }, 120);
@@ -1630,6 +1636,13 @@ GAME_HTML = r"""
   }
 
   function updatePlayer(dt) {
+    onIsland = false;
+    islands.forEach(isl => {
+      const dx = player.position.x - isl.x, dz = player.position.z - isl.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < isl.r && Math.abs(player.position.y - (isl.y + 0.9)) < 4) onIsland = true;
+    });
+
     const flatForward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const flatRight = new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
 
@@ -1799,6 +1812,7 @@ GAME_HTML = r"""
     if (!started) { renderer.render(scene, camera); return; }
     const dt = Math.min(clock.getDelta(), 0.05);
     updatePlayer(dt);
+    safeZoneEl.style.display = onIsland ? 'block' : 'none';
     updateCamera();
     updateGhosts(dt);
     updateBolts(dt);
