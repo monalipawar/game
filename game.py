@@ -1259,6 +1259,18 @@ autoAimBtn.addEventListener('click', (e) => {
         recoil();
         const boltColor = isBlast ? 0xff8844 : (target.kind === 'boss' ? bossTypeOf(target.index).boltColor : 0x7cf7ff);
         const bolt = makeMissile(boltColor, isBlast);
+
+// Fire exactly where the pink dot is pointing
+const aimDir = new THREE.Vector3();
+camera.getWorldDirection(aimDir);
+
+const muzzlePos = new THREE.Vector3();
+gunMuzzle.getWorldPosition(muzzlePos);
+
+bolt.position.copy(muzzlePos);
+orientMissile(bolt, aimDir);
+
+scene.add(bolt);
         bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
         scene.add(bolt);
         const dmg = isBlast ? (26 + Math.floor(Math.random() * 14)) :
