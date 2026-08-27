@@ -33,8 +33,11 @@ def save_json(path, data):
     except Exception:
         pass
 
-def default_boss():
-    return {"hp": 900, "max_hp": 900, "tier": 1, "x": 0, "y": 8, "z": -8, "alive": True, "respawn_at": 0}
+def default_boss(slot):
+    return {"slot": slot, "hp": 900, "max_hp": 900, "tier": 1, "alive": True, "respawn_at": 0}
+
+def default_bosses():
+    return [default_boss(0), default_boss(1), default_boss(2)]
 
 st.markdown("""
 <style>
@@ -65,7 +68,7 @@ div[data-testid="stTextArea"]:has(textarea[aria-label="od_sync_data"]) { display
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="od-title">🪐 OrbitDrift</p>', unsafe_allow_html=True)
-st.markdown('<p class="od-sub">A sprawling archipelago with a shared boss fight, room-code multiplayer, and live chat. Press F to fly, C to switch camera, E to attack the boss.</p>', unsafe_allow_html=True)
+st.markdown('<p class="od-sub">A sprawling archipelago with 3 roaming bosses that shoot back, room-code multiplayer, and live chat. Press F to fly, C to switch camera, E to attack.</p>', unsafe_allow_html=True)
 
 if "od_player_id" not in st.session_state:
     st.session_state.od_player_id = uuid.uuid4().hex[:8]
@@ -133,9 +136,9 @@ st.markdown(
 
 # --- Handle incoming sync payload from the client (position, chat, boss damage) ---
 sync_raw = st.session_state.get("od_sync_data", "")
-state = load_json(room_state_path(room), {"players": {}, "boss": default_boss()})
-if "boss" not in state:
-    state["boss"] = default_boss()
+state = load_json(room_state_path(room), {"players": {}, "bosses": default_bosses()})
+if "bosses" not in state:
+    state["bosses"] = default_bosses()
 
 if sync_raw:
     try:
@@ -151,23 +154,32 @@ if sync_raw:
         }
         st.session_state.od_hp = p.get("hp", st.session_state.od_hp)
 
-        dmg = payload.get("boss_damage", 0)
-        if dmg and state["boss"].get("alive", True):
-            state["boss"]["hp"] = max(0, state["boss"]["hp"] - dmg)
-            if state["boss"]["hp"] <= 0:
-                state["boss"]["alive"] = False
-                state["boss"]["respawn_at"] = time.time() + 12
+        boss_dmg = payload.get("boss_damage", {}) or {}
+        for slot_str, dmg in boss_dmg.items():
+            try:
+                slot = int(slot_str)
+            except Exception:
+                continue
+            if slot < 0 or slot >= len(state["bosses"]) or not dmg:
+                continue
+            b = state["bosses"][slot]
+            if b.get("alive", True):
+                b["hp"] = max(0, b["hp"] - dmg)
+                if b["hp"] <= 0:
+                    b["alive"] = False
+                    b["respawn_at"] = time.time() + 12
 
     except Exception:
         pass
 
-# respawn boss if timer elapsed
-if not state["boss"].get("alive", True) and time.time() > state["boss"].get("respawn_at", 0):
-    tier = state["boss"].get("tier", 1) + 1
-    new_boss = default_boss()
-    new_boss["tier"] = tier
-    new_boss["hp"] = new_boss["max_hp"] = 900 + (tier - 1) * 350
-    state["boss"] = new_boss
+# respawn any boss whose timer elapsed
+for b in state["bosses"]:
+    if not b.get("alive", True) and time.time() > b.get("respawn_at", 0):
+        tier = b.get("tier", 1) + 1
+        b["tier"] = tier
+        b["hp"] = b["max_hp"] = 900 + (tier - 1) * 350
+        b["alive"] = True
+        b["respawn_at"] = 0
 
 # prune stale players (not synced in 10s)
 now = time.time()
@@ -177,7 +189,7 @@ save_json(room_state_path(room), state)
 other_players = [
     {"id": pid, **pl} for pid, pl in state["players"].items() if pid != my_id
 ]
-boss_state = state["boss"]
+bosses_state = state["bosses"]
 chat_log = load_json(room_chat_path(room), [])[-20:]
 
 # internal widgets the JS heartbeat uses to push position/damage/chat back into Streamlit.
@@ -195,7 +207,7 @@ INIT_DATA = json.dumps({
     "myColor": st.session_state.od_color,
     "myHp": st.session_state.od_hp,
     "otherPlayers": other_players,
-    "boss": boss_state,
+    "bosses": bosses_state,
     "isSolo": is_solo,
 })
 
@@ -227,11 +239,28 @@ GAME_HTML = r"""
   </div>
 
   <div id="od-boss-hud" style="position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:5;
-      width:min(60%,460px); font-family:'Outfit',sans-serif; color:#e8e6ff; text-align:center;">
-    <div id="od-boss-name" style="font-size:0.9rem; font-weight:700; letter-spacing:0.05em; margin-bottom:4px;
-        text-shadow:0 0 8px rgba(244,114,182,0.6);">VOID WYRM · TIER 1</div>
-    <div style="height:14px; border-radius:8px; background:rgba(20,14,50,0.6); border:1px solid rgba(244,114,182,0.35); overflow:hidden;">
-      <div id="od-boss-bar" style="height:100%; width:100%; background:linear-gradient(90deg,#f472b6,#a78bfa);"></div>
+      width:min(66%,520px); font-family:'Outfit',sans-serif; color:#e8e6ff; text-align:center;
+      display:flex; gap:10px; justify-content:center;">
+    <div class="od-boss-slot" id="od-boss-slot-0" style="flex:1; min-width:0;">
+      <div class="od-boss-name" id="od-boss-name-0" style="font-size:0.78rem; font-weight:700; letter-spacing:0.04em; margin-bottom:4px;
+          text-shadow:0 0 8px rgba(244,114,182,0.6); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">VOID WYRM · T1</div>
+      <div style="height:11px; border-radius:8px; background:rgba(20,14,50,0.6); border:1px solid rgba(244,114,182,0.35); overflow:hidden;">
+        <div class="od-boss-bar" id="od-boss-bar-0" style="height:100%; width:100%; background:linear-gradient(90deg,#f472b6,#a78bfa);"></div>
+      </div>
+    </div>
+    <div class="od-boss-slot" id="od-boss-slot-1" style="flex:1; min-width:0;">
+      <div class="od-boss-name" id="od-boss-name-1" style="font-size:0.78rem; font-weight:700; letter-spacing:0.04em; margin-bottom:4px;
+          text-shadow:0 0 8px rgba(96,165,250,0.6); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">NOVA SENTINEL · T1</div>
+      <div style="height:11px; border-radius:8px; background:rgba(20,14,50,0.6); border:1px solid rgba(96,165,250,0.35); overflow:hidden;">
+        <div class="od-boss-bar" id="od-boss-bar-1" style="height:100%; width:100%; background:linear-gradient(90deg,#60a5fa,#a78bfa);"></div>
+      </div>
+    </div>
+    <div class="od-boss-slot" id="od-boss-slot-2" style="flex:1; min-width:0;">
+      <div class="od-boss-name" id="od-boss-name-2" style="font-size:0.78rem; font-weight:700; letter-spacing:0.04em; margin-bottom:4px;
+          text-shadow:0 0 8px rgba(251,146,60,0.6); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">CRIMSON WARDEN · T1</div>
+      <div style="height:11px; border-radius:8px; background:rgba(20,14,50,0.6); border:1px solid rgba(251,146,60,0.35); overflow:hidden;">
+        <div class="od-boss-bar" id="od-boss-bar-2" style="height:100%; width:100%; background:linear-gradient(90deg,#fb923c,#a78bfa);"></div>
+      </div>
     </div>
   </div>
 
@@ -305,8 +334,8 @@ GAME_HTML = r"""
   const weaponEl = document.getElementById('od-weapon');
   const bestEl = document.getElementById('od-best');
   const rosterEl = document.getElementById('od-roster');
-  const bossBarEl = document.getElementById('od-boss-bar');
-  const bossNameEl = document.getElementById('od-boss-name');
+  const bossBarEls = [document.getElementById('od-boss-bar-0'), document.getElementById('od-boss-bar-1'), document.getElementById('od-boss-bar-2')];
+  const bossNameEls = [document.getElementById('od-boss-name-0'), document.getElementById('od-boss-name-1'), document.getElementById('od-boss-name-2')];
   const msgEl = document.getElementById('od-msg');
   const scopeEl = document.getElementById('od-scope');
   const startScreen = document.getElementById('od-startscreen');
@@ -339,10 +368,17 @@ GAME_HTML = r"""
     { name: 'NOVA SENTINEL', color: 0x1f3a6b, emissive: 0x60a5fa, boltColor: 0x60a5fa },
     { name: 'CRIMSON WARDEN', color: 0x7a2f10, emissive: 0xfb923c, boltColor: 0xfb923c }
   ];
-  let bossMesh = null, bossHp = INIT.boss.hp, bossMaxHp = INIT.boss.max_hp, bossAlive = INIT.boss.alive;
-  let bossTier = INIT.boss.tier || 1;
-  let bossType = BOSS_TYPES[(bossTier - 1) % BOSS_TYPES.length];
-  let pendingBossDamage = 0;
+  let bossMeshes = [null, null, null];
+  let bossHp = [INIT.bosses[0].hp, INIT.bosses[1].hp, INIT.bosses[2].hp];
+  let bossMaxHp = [INIT.bosses[0].max_hp, INIT.bosses[1].max_hp, INIT.bosses[2].max_hp];
+  let bossAlive = [INIT.bosses[0].alive, INIT.bosses[1].alive, INIT.bosses[2].alive];
+  let bossTier = [INIT.bosses[0].tier || 1, INIT.bosses[1].tier || 1, INIT.bosses[2].tier || 1];
+  function bossTypeOf(i) { return BOSS_TYPES[(bossTier[i] - 1) % BOSS_TYPES.length]; }
+  let bossAnchors = [
+    { x: 130, z: 0 }, { x: -110, z: 100 }, { x: -60, z: -150 }
+  ];
+  let bossLastShot = [0, 0, 0];
+  let pendingBossDamage = {};
   let lastAttack = 0;
   const ATTACK_COOLDOWN = 0.5;
   const ATTACK_RANGE = 60;
@@ -354,6 +390,7 @@ GAME_HTML = r"""
   };
   let enemies = [];
   let enemyBolts = [];
+  let bossBolts = [];
 
   let raycaster = new THREE.Raycaster();
   let lockedTarget = null; // { kind: 'boss' } or { kind: 'enemy', ref: enemyObj }
@@ -458,7 +495,7 @@ GAME_HTML = r"""
     buildIslands();
     buildOrbs();
     buildRace();
-    buildBoss();
+    buildBosses();
     buildEnemies();
     buildHealthPacks();
     syncGhosts(INIT.otherPlayers);
@@ -577,11 +614,13 @@ GAME_HTML = r"""
         islandMesh(x, y, z, r, colors[i % colors.length]);
       }
     };
-    ring(14, 70, 8, 6, 3.2, 5);
-    ring(20, 140, 14, 10, 3, 5.5);
-    ring(26, 220, 20, 14, 2.8, 6);
-    ring(20, 300, 26, 16, 3, 5.5);
-    ring(16, 380, 32, 20, 3.2, 6.5);
+    ring(16, 90, 8, 6, 3.2, 5);
+    ring(22, 180, 14, 10, 3, 5.5);
+    ring(28, 290, 20, 14, 2.8, 6);
+    ring(26, 400, 26, 16, 3, 5.5);
+    ring(24, 520, 32, 20, 3.2, 6.5);
+    ring(20, 650, 40, 24, 3.5, 7);
+    ring(16, 780, 46, 26, 4, 7.5);
   }
 
   function buildOrbs() {
@@ -861,27 +900,31 @@ GAME_HTML = r"""
     scopeEl.style.display = scoping ? 'block' : 'none';
   }
 
-  function buildBoss() {
-    const group = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: bossType.color, emissive: bossType.emissive, emissiveIntensity: 0.35, roughness: 0.5 });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(3, 20, 20), bodyMat);
-    group.add(body);
-    for (let i = 0; i < 6; i++) {
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2, 6), bodyMat);
-      const a = (i / 6) * Math.PI * 2;
-      spike.position.set(Math.cos(a) * 2.6, Math.sin(a * 2) * 0.6, Math.sin(a) * 2.6);
-      spike.lookAt(spike.position.clone().multiplyScalar(2));
-      spike.rotateX(Math.PI / 2);
-      group.add(spike);
-    }
-    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0xffe066, emissiveIntensity: 1 });
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 10), eyeMat);
-    eye.position.set(0, 0.5, 2.6);
-    group.add(eye);
+  function buildBosses() {
+    for (let i = 0; i < 3; i++) {
+      const type = bossTypeOf(i);
+      const group = new THREE.Group();
+      const bodyMat = new THREE.MeshStandardMaterial({ color: type.color, emissive: type.emissive, emissiveIntensity: 0.35, roughness: 0.5 });
+      const body = new THREE.Mesh(new THREE.SphereGeometry(3, 20, 20), bodyMat);
+      group.add(body);
+      for (let j = 0; j < 6; j++) {
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2, 6), bodyMat);
+        const a = (j / 6) * Math.PI * 2;
+        spike.position.set(Math.cos(a) * 2.6, Math.sin(a * 2) * 0.6, Math.sin(a) * 2.6);
+        spike.lookAt(spike.position.clone().multiplyScalar(2));
+        spike.rotateX(Math.PI / 2);
+        group.add(spike);
+      }
+      const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0xffe066, emissiveIntensity: 1 });
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 10), eyeMat);
+      eye.position.set(0, 0.5, 2.6);
+      group.add(eye);
 
-    group.position.set(0, 9, -8);
-    scene.add(group);
-    bossMesh = group;
+      const anchor = bossAnchors[i];
+      group.position.set(anchor.x, 22, anchor.z);
+      scene.add(group);
+      bossMeshes[i] = group;
+    }
 
     const ringGeo = new THREE.TorusGeometry(4.2, 0.12, 8, 32);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.9 });
@@ -893,12 +936,73 @@ GAME_HTML = r"""
     updateBossHud();
   }
 
+  function updateBossMovement(dt) {
+    const now = Date.now() / 1000; // real time so all clients roughly agree on boss position
+    for (let i = 0; i < 3; i++) {
+      const mesh = bossMeshes[i];
+      if (!mesh) continue;
+      if (!bossAlive[i]) { mesh.visible = false; continue; }
+      mesh.visible = true;
+      const anchor = bossAnchors[i];
+      const orbitSpeed = 0.09 + i * 0.02;
+      const orbitRadius = 46 + Math.sin(now * 0.15 + i) * 14;
+      const heightBob = 22 + Math.sin(now * 0.3 + i * 2) * 8;
+      const angle = now * orbitSpeed + i * (Math.PI * 2 / 3);
+      mesh.position.set(
+        anchor.x + Math.cos(angle) * orbitRadius,
+        heightBob,
+        anchor.z + Math.sin(angle) * orbitRadius
+      );
+      mesh.rotation.y += dt * (0.4 + i * 0.1);
+      mesh.lookAt(player.position.x, mesh.position.y, player.position.z);
+
+      // Boss occasionally fires at the player if they're in range.
+      const distToPlayer = mesh.position.distanceTo(player.position);
+      if (distToPlayer < 130 && now - bossLastShot[i] > (2.6 - i * 0.2)) {
+        bossLastShot[i] = now;
+        fireBossBolt(i, mesh);
+      }
+    }
+  }
+
+  function fireBossBolt(i, mesh) {
+    const type = bossTypeOf(i);
+    const mat = new THREE.MeshStandardMaterial({ color: type.boltColor, emissive: type.boltColor, emissiveIntensity: 1.5 });
+    const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 10), mat);
+    bolt.position.copy(mesh.position);
+    scene.add(bolt);
+    const dir = new THREE.Vector3().subVectors(player.position, mesh.position).normalize();
+    bossBolts.push({ mesh: bolt, dir, dmg: 14 + Math.floor(Math.random() * 10) });
+  }
+
+  function updateBossBolts(dt) {
+    for (let i = bossBolts.length - 1; i >= 0; i--) {
+      const b = bossBolts[i];
+      b.mesh.position.addScaledVector(b.dir, 34 * dt);
+      if (b.mesh.position.distanceTo(player.position) < 2) {
+        damagePlayer(b.dmg);
+        scene.remove(b.mesh);
+        bossBolts.splice(i, 1);
+        continue;
+      }
+      if (b.mesh.position.length() > 900) {
+        scene.remove(b.mesh);
+        bossBolts.splice(i, 1);
+      }
+    }
+  }
+
   function updateBossHud() {
-    const pct = bossAlive ? Math.max(0, bossHp / bossMaxHp) * 100 : 0;
-    bossBarEl.style.width = pct + '%';
-    bossNameEl.textContent = bossAlive ? (bossType.name + ' · TIER ' + bossTier) : (bossType.name + ' DEFEATED — reforming…');
-    if (bossMesh) bossMesh.visible = bossAlive;
-    if (lockRing && !bossAlive) lockRing.visible = false;
+    for (let i = 0; i < 3; i++) {
+      const type = bossTypeOf(i);
+      const pct = bossAlive[i] ? Math.max(0, bossHp[i] / bossMaxHp[i]) * 100 : 0;
+      bossBarEls[i].style.width = pct + '%';
+      bossNameEls[i].textContent = bossAlive[i] ? (type.name + ' · T' + bossTier[i]) : (type.name + ' — reforming…');
+    }
+    if (lockedTarget && lockedTarget.kind === 'boss' && !bossAlive[lockedTarget.index]) {
+      lockedTarget = null;
+      if (lockRing) lockRing.visible = false;
+    }
   }
 
   function tryLockTarget(clientX, clientY) {
@@ -910,7 +1014,9 @@ GAME_HTML = r"""
     raycaster.setFromCamera(mouse, camera);
 
     const candidates = [];
-    if (bossMesh && bossAlive) candidates.push({ mesh: bossMesh, target: { kind: 'boss' } });
+    for (let i = 0; i < 3; i++) {
+      if (bossMeshes[i] && bossAlive[i]) candidates.push({ mesh: bossMeshes[i], target: { kind: 'boss', index: i } });
+    }
     enemies.forEach(e => { if (e.alive) candidates.push({ mesh: e.mesh, target: { kind: 'enemy', ref: e } }); });
 
     let closest = null, closestDist = Infinity;
@@ -926,7 +1032,7 @@ GAME_HTML = r"""
       const wasLocked = lockedTarget && sameTarget(lockedTarget, closest);
       lockedTarget = closest;
       lockRing.visible = true;
-      const label = closest.kind === 'boss' ? bossType.name : closest.ref.def.label;
+      const label = closest.kind === 'boss' ? bossTypeOf(closest.index).name : closest.ref.def.label;
       msgEl.textContent = 'Target locked: ' + label + '. Click again or press E to fire.';
       if (wasLocked) fireBolt();
     } else {
@@ -937,13 +1043,13 @@ GAME_HTML = r"""
 
   function sameTarget(a, b) {
     if (a.kind !== b.kind) return false;
-    if (a.kind === 'boss') return true;
+    if (a.kind === 'boss') return a.index === b.index;
     return a.ref === b.ref;
   }
 
   function targetMesh(t) {
     if (!t) return null;
-    if (t.kind === 'boss') return bossAlive ? bossMesh : null;
+    if (t.kind === 'boss') return bossAlive[t.index] ? bossMeshes[t.index] : null;
     return t.ref.alive ? t.ref.mesh : null;
   }
 
@@ -1007,18 +1113,22 @@ GAME_HTML = r"""
     }
   }
 
-  function explodeSplash(pos, dmg, excludeBoss, excludeEnemy) {
+  function explodeSplash(pos, dmg, excludeBossIndex, excludeEnemy) {
     spawnExplosion(pos, BLAST_RADIUS);
-    if (bossMesh && bossAlive && !excludeBoss && pos.distanceTo(bossMesh.position) < BLAST_RADIUS) {
-      bossHp = Math.max(0, bossHp - dmg);
-      pendingBossDamage += dmg;
-      flashMesh(bossMesh);
-      updateBossHud();
-      if (bossHp <= 0) {
-        bossAlive = false;
-        if (lockedTarget && lockedTarget.kind === 'boss') { lockedTarget = null; lockRing.visible = false; }
+    for (let i = 0; i < 3; i++) {
+      if (i === excludeBossIndex) continue;
+      if (!bossAlive[i] || !bossMeshes[i]) continue;
+      if (pos.distanceTo(bossMeshes[i].position) < BLAST_RADIUS) {
+        bossHp[i] = Math.max(0, bossHp[i] - dmg);
+        pendingBossDamage[i] = (pendingBossDamage[i] || 0) + dmg;
+        flashMesh(bossMeshes[i]);
         updateBossHud();
-        msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
+        if (bossHp[i] <= 0) {
+          bossAlive[i] = false;
+          if (lockedTarget && lockedTarget.kind === 'boss' && lockedTarget.index === i) { lockedTarget = null; lockRing.visible = false; }
+          updateBossHud();
+          msgEl.textContent = 'The ' + bossTypeOf(i).name + ' shatters! It will reform shortly, stronger than before.';
+        }
       }
     }
     enemies.forEach(e => {
@@ -1076,7 +1186,9 @@ GAME_HTML = r"""
     camera.getWorldPosition(camPos);
 
     const candidates = [];
-    if (bossMesh && bossAlive) candidates.push({ kind: 'boss' });
+    for (let i = 0; i < 3; i++) {
+      if (bossMeshes[i] && bossAlive[i]) candidates.push({ kind: 'boss', index: i });
+    }
     enemies.forEach(e => { if (e.alive) candidates.push({ kind: 'enemy', ref: e }); });
 
     let best = null, bestScore = -Infinity;
@@ -1121,7 +1233,7 @@ GAME_HTML = r"""
       } else {
         lastAttack = now;
         recoil();
-        const boltColor = isBlast ? 0xff8844 : (target.kind === 'boss' ? bossType.boltColor : 0x7cf7ff);
+        const boltColor = isBlast ? 0xff8844 : (target.kind === 'boss' ? bossTypeOf(target.index).boltColor : 0x7cf7ff);
         const bolt = makeMissile(boltColor, isBlast);
         bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
         scene.add(bolt);
@@ -1186,26 +1298,33 @@ GAME_HTML = r"""
     msgEl.textContent = rapidFire ? 'Rapid fire engaged — hold E to unload.' : 'Rapid fire disengaged.';
   }
 
+  function tryDamageNearestBoss(pos, radius, dmg) {
+    for (let i = 0; i < 3; i++) {
+      if (!bossAlive[i] || !bossMeshes[i]) continue;
+      if (pos.distanceTo(bossMeshes[i].position) < radius) {
+        bossHp[i] = Math.max(0, bossHp[i] - dmg);
+        pendingBossDamage[i] = (pendingBossDamage[i] || 0) + dmg;
+        flashMesh(bossMeshes[i]);
+        updateBossHud();
+        if (bossHp[i] <= 0) {
+          bossAlive[i] = false;
+          if (lockedTarget && lockedTarget.kind === 'boss' && lockedTarget.index === i) { lockedTarget = null; lockRing.visible = false; }
+          updateBossHud();
+          msgEl.textContent = 'The ' + bossTypeOf(i).name + ' shatters! It will reform shortly, stronger than before.';
+        }
+        return i;
+      }
+    }
+    return -1;
+  }
+
   function updateBullets(dt) {
     const now = performance.now() / 1000;
     for (let i = bullets.length - 1; i >= 0; i--) {
       const b = bullets[i];
       b.mesh.position.addScaledVector(b.dir, BULLET_SPEED * dt);
 
-      let hit = false;
-      if (bossMesh && bossAlive && b.mesh.position.distanceTo(bossMesh.position) < BULLET_BOSS_RADIUS) {
-        bossHp = Math.max(0, bossHp - b.dmg);
-        pendingBossDamage += b.dmg;
-        flashMesh(bossMesh);
-        updateBossHud();
-        if (bossHp <= 0) {
-          bossAlive = false;
-          if (lockedTarget && lockedTarget.kind === 'boss') { lockedTarget = null; lockRing.visible = false; }
-          updateBossHud();
-          msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
-        }
-        hit = true;
-      }
+      let hit = tryDamageNearestBoss(b.mesh.position, BULLET_BOSS_RADIUS, b.dmg) >= 0;
       if (!hit) {
         for (const e of enemies) {
           if (!e.alive) continue;
@@ -1245,23 +1364,29 @@ GAME_HTML = r"""
       }
 
       let hit = false;
-      let hitEnemyRef = null;
       let impactPos = null;
-      if (bossMesh && bossAlive && b.mesh.position.distanceTo(bossMesh.position) < FREE_BOLT_BOSS_RADIUS) {
+      const nearestBossCheck = (radius) => {
+        for (let bi = 0; bi < 3; bi++) {
+          if (bossAlive[bi] && bossMeshes[bi] && b.mesh.position.distanceTo(bossMeshes[bi].position) < radius) return bi;
+        }
+        return -1;
+      };
+      const bIdx = nearestBossCheck(FREE_BOLT_BOSS_RADIUS);
+      if (bIdx >= 0) {
         impactPos = b.mesh.position.clone();
         if (!b.blast) {
-          bossHp = Math.max(0, bossHp - b.dmg);
-          pendingBossDamage += b.dmg;
-          flashMesh(bossMesh);
+          bossHp[bIdx] = Math.max(0, bossHp[bIdx] - b.dmg);
+          pendingBossDamage[bIdx] = (pendingBossDamage[bIdx] || 0) + b.dmg;
+          flashMesh(bossMeshes[bIdx]);
           updateBossHud();
-          if (bossHp <= 0) {
-            bossAlive = false;
-            if (lockedTarget && lockedTarget.kind === 'boss') { lockedTarget = null; lockRing.visible = false; }
+          if (bossHp[bIdx] <= 0) {
+            bossAlive[bIdx] = false;
+            if (lockedTarget && lockedTarget.kind === 'boss' && lockedTarget.index === bIdx) { lockedTarget = null; lockRing.visible = false; }
             updateBossHud();
-            msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
+            msgEl.textContent = 'The ' + bossTypeOf(bIdx).name + ' shatters! It will reform shortly, stronger than before.';
           }
         } else {
-          explodeSplash(impactPos, b.dmg, false, null);
+          explodeSplash(impactPos, b.dmg, bIdx, null);
         }
         hit = true;
       }
@@ -1326,17 +1451,18 @@ GAME_HTML = r"""
       if (dist < 1.6) {
         const impactPos = b.mesh.position.clone();
         if (b.target.kind === 'boss') {
-          bossHp = Math.max(0, bossHp - b.dmg);
-          pendingBossDamage += b.dmg;
-          flashMesh(bossMesh);
+          const bi = b.target.index;
+          bossHp[bi] = Math.max(0, bossHp[bi] - b.dmg);
+          pendingBossDamage[bi] = (pendingBossDamage[bi] || 0) + b.dmg;
+          flashMesh(bossMeshes[bi]);
           updateBossHud();
-          if (bossHp <= 0) {
-            bossAlive = false;
-            if (lockedTarget && lockedTarget.kind === 'boss') { lockedTarget = null; lockRing.visible = false; }
+          if (bossHp[bi] <= 0) {
+            bossAlive[bi] = false;
+            if (lockedTarget && lockedTarget.kind === 'boss' && lockedTarget.index === bi) { lockedTarget = null; lockRing.visible = false; }
             updateBossHud();
-            msgEl.textContent = 'The ' + bossType.name + ' shatters! It will reform shortly, stronger than before.';
+            msgEl.textContent = 'The ' + bossTypeOf(bi).name + ' shatters! It will reform shortly, stronger than before.';
           }
-          if (b.blast) explodeSplash(impactPos, b.dmg, true, null);
+          if (b.blast) explodeSplash(impactPos, b.dmg, bi, null);
         } else {
           const e = b.target.ref;
           e.hp = Math.max(0, e.hp - b.dmg);
@@ -1505,7 +1631,6 @@ GAME_HTML = r"""
   function checkRace(dt) {
     orbs.forEach(o => o.rotation.y += dt * 2);
     raceGates.forEach(g => { g.mesh.rotation.z += dt * 0.6; });
-    if (bossMesh) bossMesh.rotation.y += dt * 0.4;
 
     if (!raceActive) {
       const g0 = raceGates[0];
@@ -1551,7 +1676,7 @@ GAME_HTML = r"""
         },
         boss_damage: pendingBossDamage
       };
-      pendingBossDamage = 0;
+      pendingBossDamage = {};
       const doc = window.parent.document;
       const inp = doc.querySelector('textarea[aria-label="od_sync_data"]');
       if (inp) {
@@ -1576,6 +1701,8 @@ GAME_HTML = r"""
     updateBolts(dt);
     updateEnemies(dt);
     updateEnemyBolts(dt);
+    updateBossMovement(dt);
+    updateBossBolts(dt);
     updateFreeBolts(dt);
     updateBullets(dt);
     updateExplosions(dt);
