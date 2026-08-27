@@ -286,7 +286,7 @@ GAME_HTML = r"""
       <line x1="50%" y1="62%" x2="50%" y2="92%" stroke="#0a0a0a" stroke-width="2"/>
       <line x1="8%" y1="50%" x2="38%" y2="50%" stroke="#0a0a0a" stroke-width="2"/>
       <line x1="62%" y1="50%" x2="92%" y2="50%" stroke="#0a0a0a" stroke-width="2"/>
-      <circle cx="50%" cy="50%" r="2.5" fill="#f472b6"/>
+      <circle id="od-aim-dot" cx="50%" cy="50%" r="2.5" fill="#f472b6"/>
      </svg>
 
   <button id="od-auto-aim"
