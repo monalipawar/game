@@ -150,6 +150,7 @@ if sync_raw:
             "x": p.get("x", 0), "y": p.get("y", 8), "z": p.get("z", 0),
             "yaw": p.get("yaw", 0),
             "hp": p.get("hp", st.session_state.od_hp),
+            "pvp": bool(p.get("pvp", False)),
             "last_seen": time.time(),
         }
         st.session_state.od_hp = p.get("hp", st.session_state.od_hp)
@@ -169,8 +170,23 @@ if sync_raw:
                     b["alive"] = False
                     b["respawn_at"] = time.time() + 12
 
+        pvp_dmg = payload.get("pvp_damage", {}) or {}
+        if pvp_dmg:
+            state.setdefault("pvp_incoming", {})
+            for target_id, dmg in pvp_dmg.items():
+                if not dmg or target_id == my_id:
+                    continue
+                state["pvp_incoming"][target_id] = state["pvp_incoming"].get(target_id, 0) + dmg
+
     except Exception:
         pass
+
+# apply any PvP damage other players have dealt to me since my last request, then clear it
+incoming_pvp = state.get("pvp_incoming", {}).pop(my_id, 0)
+if incoming_pvp:
+    st.session_state.od_hp = max(0, st.session_state.od_hp - incoming_pvp)
+    if st.session_state.od_hp <= 0:
+        st.session_state.od_hp = 100
 
 # respawn any boss whose timer elapsed
 for b in state["bosses"]:
@@ -239,6 +255,9 @@ GAME_HTML = r"""
     <div id="od-weapon" style="margin-top:8px; font-size:0.85rem; color:#facc15;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
         border:1px solid rgba(250,204,21,0.3);">🎯 Weapon: Target Missiles (2)</div>
+    <div id="od-pvp" style="margin-top:8px; font-size:0.85rem; color:#94a3b8;
+        background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
+        border:1px solid rgba(148,163,184,0.3);">⚔ PvP: OFF (P)</div>
   </div>
 
   <div id="od-boss-hud" style="position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:5;
@@ -275,6 +294,35 @@ GAME_HTML = r"""
     <div id="od-roster">Players online: 1</div>
   </div>
 
+  <div id="od-minimap-wrap" style="position:absolute; top:76px; right:14px; z-index:5;
+      background:rgba(10,7,26,0.6); backdrop-filter: blur(8px); border-radius:50%;
+      border:1px solid rgba(124,247,255,0.25); padding:4px; box-shadow:0 0 18px rgba(124,247,255,0.08);">
+    <canvas id="od-minimap" width="160" height="160" style="display:block; border-radius:50%;"></canvas>
+  </div>
+
+  <div id="od-shop-btn" style="position:absolute; top:76px; right:190px; z-index:5; cursor:pointer;
+      color:#facc15; font-family:'Outfit',sans-serif; font-size:0.8rem; background:rgba(20,14,50,0.55);
+      backdrop-filter: blur(8px); padding:8px 14px; border-radius:12px; border:1px solid rgba(250,204,21,0.35);
+      user-select:none;">🛒 Shop (B)</div>
+
+  <div id="od-shop-panel" style="display:none; position:absolute; inset:0; z-index:9;
+      align-items:center; justify-content:center; background:rgba(4,3,13,0.8); backdrop-filter: blur(6px);
+      font-family:'Outfit',sans-serif; color:#e8e6ff;">
+    <div style="width:min(90%,480px); background:rgba(20,14,50,0.9); border:1px solid rgba(250,204,21,0.3);
+        border-radius:18px; padding:22px; box-shadow:0 0 40px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <div style="font-size:1.3rem; font-weight:800; color:#facc15;">🛒 Drifter's Shop</div>
+        <div style="font-size:0.9rem; color:#c9c4ff;">✨ Currency: <span id="od-shop-currency">0</span></div>
+      </div>
+      <div id="od-shop-items" style="display:flex; flex-direction:column; gap:10px; max-height:50vh; overflow-y:auto;"></div>
+      <div style="text-align:center; margin-top:16px;">
+        <button id="od-shop-close" style="padding:10px 26px; border-radius:12px; border:none; cursor:pointer;
+            font-family:'Outfit',sans-serif; font-weight:600; color:#04030d;
+            background:linear-gradient(90deg,#7cf7ff,#a78bfa);">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="od-scope" style="position:absolute; inset:0; z-index:8; display:none; pointer-events:none;">
     <svg width="100%" height="100%" style="position:absolute; inset:0;">
       <defs>
@@ -297,7 +345,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire (hold for rapid fire) · 1 bullets · 2 target missiles · 3 blast missiles · 4 toggles rapid fire · right-click toggles scope · green crosses heal you · islands are a safe zone
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire (hold for rapid fire) · 1 bullets · 2 target missiles · 3 blast missiles · 4 toggles rapid fire · right-click toggles scope · P toggles PvP · B opens shop · green crosses heal you · islands are a safe zone
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -335,6 +383,14 @@ GAME_HTML = r"""
   const safeZoneEl = document.getElementById('od-safezone');
   const shieldEl = document.getElementById('od-shield');
   const weaponEl = document.getElementById('od-weapon');
+  const pvpEl = document.getElementById('od-pvp');
+  const minimapCanvas = document.getElementById('od-minimap');
+  const minimapCtx = minimapCanvas.getContext('2d');
+  const shopBtn = document.getElementById('od-shop-btn');
+  const shopPanel = document.getElementById('od-shop-panel');
+  const shopItemsEl = document.getElementById('od-shop-items');
+  const shopCurrencyEl = document.getElementById('od-shop-currency');
+  const shopCloseBtn = document.getElementById('od-shop-close');
   const bestEl = document.getElementById('od-best');
   const rosterEl = document.getElementById('od-roster');
   const bossBarEls = [document.getElementById('od-boss-bar-0'), document.getElementById('od-boss-bar-1'), document.getElementById('od-boss-bar-2')];
@@ -360,6 +416,15 @@ GAME_HTML = r"""
   let dragging = false, lastMouseX = 0, lastMouseY = 0;
   let flying = false;
   let scoping = false;
+  let pvpEnabled = false;
+  let currency = 0;
+  let upgrades = { maxHpBoost: 0, dmgBoost: 0, speedBoost: 0, shieldBoost: 0 };
+  const SHOP_ITEMS = [
+    { key: 'maxHpBoost', name: '+20 Max HP', desc: 'Permanently raises your maximum health.', cost: 15, max: 5 },
+    { key: 'dmgBoost', name: '+10% Weapon Damage', desc: 'All weapons hit harder.', cost: 20, max: 5 },
+    { key: 'speedBoost', name: '+8% Move Speed', desc: 'Move and fly a bit faster.', cost: 18, max: 5 },
+    { key: 'shieldBoost', name: '+1s Shield Duration', desc: 'Your shield blocks damage longer.', cost: 15, max: 5 }
+  ];
   const BASE_FOV = 65;
   const SCOPE_FOV = 22;
 
@@ -384,6 +449,7 @@ GAME_HTML = r"""
   ];
   let bossLastShot = [0, 0, 0];
   let pendingBossDamage = {};
+  let pendingPvpDamage = {};
   let lastAttack = 0;
   const ATTACK_COOLDOWN = 0.5;
   const ATTACK_RANGE = 60;
@@ -439,6 +505,154 @@ GAME_HTML = r"""
     bestTime = t;
     try { localStorage.setItem('orbitdrift_best', t.toString()); } catch(e) {}
     bestEl.textContent = t.toFixed(2) + 's';
+  }
+
+  function loadShopData() {
+    try {
+      const c = localStorage.getItem('orbitdrift_currency');
+      currency = c ? parseInt(c, 10) : 0;
+      const u = localStorage.getItem('orbitdrift_upgrades');
+      if (u) upgrades = Object.assign(upgrades, JSON.parse(u));
+    } catch(e) {}
+  }
+  function saveShopData() {
+    try {
+      localStorage.setItem('orbitdrift_currency', String(currency));
+      localStorage.setItem('orbitdrift_upgrades', JSON.stringify(upgrades));
+    } catch(e) {}
+  }
+
+  function currentMaxHp() { return 100 + upgrades.maxHpBoost * 20; }
+  function dmgMultiplier() { return 1 + upgrades.dmgBoost * 0.1; }
+  function speedMultiplier() { return 1 + upgrades.speedBoost * 0.08; }
+  function shieldDurationBonus() { return upgrades.shieldBoost * 1; }
+
+  function renderShop() {
+    shopCurrencyEl.textContent = currency;
+    shopItemsEl.innerHTML = '';
+    SHOP_ITEMS.forEach(item => {
+      const level = upgrades[item.key] || 0;
+      const maxed = level >= item.max;
+      const cost = item.cost + level * 6;
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:12px; background:rgba(255,255,255,0.04); border-radius:12px; padding:10px 14px;';
+      const info = document.createElement('div');
+      info.innerHTML = '<div style="font-weight:600;">' + item.name + ' <span style="color:#94a3b8; font-weight:400;">(Lv ' + level + '/' + item.max + ')</span></div>' +
+        '<div style="font-size:0.78rem; color:#a9a4d0;">' + item.desc + '</div>';
+      row.appendChild(info);
+      const btn = document.createElement('button');
+      btn.textContent = maxed ? 'MAXED' : ('Buy · ✨' + cost);
+      btn.disabled = maxed || currency < cost;
+      btn.style.cssText = 'padding:8px 16px; border-radius:10px; border:none; cursor:pointer; font-family:Outfit,sans-serif; font-weight:600; white-space:nowrap; color:#04030d; background:' +
+        (maxed ? '#555' : (currency < cost ? '#555' : 'linear-gradient(90deg,#7cf7ff,#a78bfa)'));
+      btn.addEventListener('click', () => {
+        if (maxed || currency < cost) return;
+        currency -= cost;
+        upgrades[item.key] = level + 1;
+        saveShopData();
+        applyUpgrades();
+        renderShop();
+        msgEl.textContent = 'Purchased ' + item.name + '!';
+      });
+      row.appendChild(btn);
+      shopItemsEl.appendChild(row);
+    });
+  }
+
+  function applyUpgrades() {
+    const newMax = currentMaxHp();
+    if (myHp > newMax) myHp = newMax;
+    hpEl.textContent = '❤ HP: ' + Math.round(myHp) + ' / ' + newMax;
+  }
+
+  function updateMinimap() {
+    const ctx = minimapCtx;
+    const W = 160, H = 160, cx = W / 2, cy = H / 2;
+    const R = 260; // world units shown to the edge of the minimap
+    const scale = (W / 2 - 6) / R;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(10,7,26,0.85)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, W / 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, W / 2 - 2, 0, Math.PI * 2);
+    ctx.clip();
+
+    const px = player.position.x, pz = player.position.z;
+
+    // Islands (faint)
+    ctx.fillStyle = 'rgba(124,247,255,0.18)';
+    islands.forEach(isl => {
+      const dx = isl.x - px, dz = isl.z - pz;
+      if (dx * dx + dz * dz > R * R * 1.3) return;
+      const mx = cx + dx * scale, my = cy + dz * scale;
+      ctx.beginPath();
+      ctx.arc(mx, my, Math.max(1.5, isl.r * scale), 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Bosses
+    for (let i = 0; i < 3; i++) {
+      if (!bossAlive[i] || !bossMeshes[i]) continue;
+      const dx = bossMeshes[i].position.x - px, dz = bossMeshes[i].position.z - pz;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      const clampedScale = dist > R ? (R / dist) * scale : scale;
+      const mx = cx + dx * clampedScale, my = cy + dz * clampedScale;
+      ctx.fillStyle = ['#f472b6', '#60a5fa', '#fb923c'][i];
+      ctx.beginPath();
+      ctx.arc(mx, my, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Other players
+    Object.values(ghosts).forEach(g => {
+      const dx = g.mesh.position.x - px, dz = g.mesh.position.z - pz;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > R * 1.4) return;
+      const clampedScale = dist > R ? (R / dist) * scale : scale;
+      const mx = cx + dx * clampedScale, my = cy + dz * clampedScale;
+      ctx.fillStyle = g.color || '#a78bfa';
+      ctx.beginPath();
+      ctx.arc(mx, my, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      if (g.pvp) {
+        ctx.strokeStyle = '#fb7185';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(mx, my, 5.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    });
+
+    ctx.restore();
+
+    // Player arrow (always centered, rotated to facing)
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(yaw);
+    ctx.fillStyle = '#7cf7ff';
+    ctx.beginPath();
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4, 5);
+    ctx.lineTo(-4, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(124,247,255,0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, W / 2 - 1, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function toggleShop() {
+    const open = shopPanel.style.display !== 'flex';
+    shopPanel.style.display = open ? 'flex' : 'none';
+    if (open) renderShop();
   }
 
   function init() {
@@ -519,6 +733,8 @@ GAME_HTML = r"""
         if (k === '2') switchWeapon('missile');
         if (k === '3') switchWeapon('blast');
         if (k === '4') toggleRapidFire();
+        if (k === 'p') togglePvp();
+        if (k === 'b') toggleShop();
       }
       keys[k] = true;
       if (e.key.startsWith('Arrow')) e.preventDefault();
@@ -566,6 +782,8 @@ GAME_HTML = r"""
     });
 
     loadBest();
+    loadShopData();
+    applyUpgrades();
     updateHudStatic();
     animate();
 
@@ -642,6 +860,30 @@ GAME_HTML = r"""
     const pack = new THREE.Mesh(packGeo, accentMat);
     pack.position.set(0, 0.15, -0.24);
     group.add(pack);
+
+    // Handheld weapon, attached to the right arm so it moves and rotates with it.
+    const handWeapon = new THREE.Group();
+    const gunMetal = new THREE.MeshStandardMaterial({ color: 0x2a2f45, metalness: 0.7, roughness: 0.35 });
+    const gunAccent = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x2dd4bf, emissiveIntensity: 0.9 });
+    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.34), gunMetal);
+    handWeapon.add(gunBody);
+    const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.22, 8), gunMetal);
+    gunBarrel.rotation.x = Math.PI / 2;
+    gunBarrel.position.set(0, 0.005, -0.28);
+    handWeapon.add(gunBarrel);
+    const gunTip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.028, 0.05, 8), gunAccent);
+    gunTip.rotation.x = Math.PI / 2;
+    gunTip.position.set(0, 0.005, -0.39);
+    handWeapon.add(gunTip);
+    const gunGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.06), gunMetal);
+    gunGrip.position.set(0, -0.1, 0.1);
+    gunGrip.rotation.x = 0.3;
+    handWeapon.add(gunGrip);
+    handWeapon.position.set(0, -0.32, -0.1);
+    handWeapon.rotation.x = -0.15;
+    armR.add(handWeapon);
+    group.userData.handWeapon = handWeapon;
+    group.userData.handWeaponAccent = gunAccent;
 
     group.position.y = 0.75;
     return group;
@@ -831,9 +1073,9 @@ GAME_HTML = r"""
       }
       hp.mesh.rotation.y += dt * 1.8;
       hp.mesh.position.y = hp.spawn.y + Math.sin(now * 2 + hp.spawn.x) * 0.3;
-      if (player.position.distanceTo(hp.mesh.position) < 1.6 && myHp < 100) {
-        myHp = Math.min(100, myHp + 35);
-        hpEl.textContent = '❤ HP: ' + Math.round(myHp);
+      if (player.position.distanceTo(hp.mesh.position) < 1.6 && myHp < currentMaxHp()) {
+        myHp = Math.min(currentMaxHp(), myHp + 35);
+        hpEl.textContent = '❤ HP: ' + Math.round(myHp) + ' / ' + currentMaxHp();
         hp.alive = false;
         hp.deadAt = now;
         hp.mesh.visible = false;
@@ -879,11 +1121,12 @@ GAME_HTML = r"""
   function activateShield() {
     const now = performance.now() / 1000;
     if (shieldActive || now < shieldReadyAt) return;
+    const dur = SHIELD_DURATION + shieldDurationBonus();
     shieldActive = true;
-    shieldEndsAt = now + SHIELD_DURATION;
-    shieldReadyAt = now + SHIELD_DURATION + SHIELD_COOLDOWN;
+    shieldEndsAt = now + dur;
+    shieldReadyAt = now + dur + SHIELD_COOLDOWN;
     shieldMesh.visible = true;
-    msgEl.textContent = 'Shield up! Incoming damage is blocked for ' + SHIELD_DURATION + 's.';
+    msgEl.textContent = 'Shield up! Incoming damage is blocked for ' + dur + 's.';
   }
 
   function updateShield(dt) {
@@ -915,15 +1158,15 @@ GAME_HTML = r"""
       return;
     }
     myHp = Math.max(0, myHp - dmg);
-    hpEl.textContent = '❤ HP: ' + Math.round(myHp);
+    hpEl.textContent = '❤ HP: ' + Math.round(myHp) + ' / ' + currentMaxHp();
     hpEl.style.borderColor = 'rgba(251,113,133,0.9)';
     setTimeout(() => { hpEl.style.borderColor = 'rgba(251,113,133,0.3)'; }, 150);
     if (myHp <= 0) {
-      myHp = 100;
+      myHp = currentMaxHp();
       player.position.set(0, 8, 0);
       playerVel.set(0, 0, 0);
       msgEl.textContent = 'You went down! Back on your feet at the spawn island.';
-      hpEl.textContent = '❤ HP: 100';
+      hpEl.textContent = '❤ HP: ' + myHp + ' / ' + currentMaxHp();
     }
   }
 
@@ -1127,6 +1370,12 @@ GAME_HTML = r"""
       if (bossMeshes[i] && bossAlive[i]) candidates.push({ mesh: bossMeshes[i], target: { kind: 'boss', index: i } });
     }
     enemies.forEach(e => { if (e.alive) candidates.push({ mesh: e.mesh, target: { kind: 'enemy', ref: e } }); });
+    if (pvpEnabled) {
+      Object.keys(ghosts).forEach(id => {
+        const g = ghosts[id];
+        if (g.pvp) candidates.push({ mesh: g.mesh, target: { kind: 'player', id: id } });
+      });
+    }
 
     let closest = null, closestDist = Infinity;
     candidates.forEach(c => {
@@ -1141,7 +1390,8 @@ GAME_HTML = r"""
       const wasLocked = lockedTarget && sameTarget(lockedTarget, closest);
       lockedTarget = closest;
       lockRing.visible = true;
-      const label = closest.kind === 'boss' ? bossTypeOf(closest.index).name : closest.ref.def.label;
+      const label = closest.kind === 'boss' ? bossTypeOf(closest.index).name :
+        (closest.kind === 'player' ? (ghosts[closest.id] && ghosts[closest.id].name || 'a drifter') : closest.ref.def.label);
       msgEl.textContent = 'Target locked: ' + label + '. Click again or press E to fire.';
       if (wasLocked) fireBolt();
     } else {
@@ -1153,12 +1403,14 @@ GAME_HTML = r"""
   function sameTarget(a, b) {
     if (a.kind !== b.kind) return false;
     if (a.kind === 'boss') return a.index === b.index;
+    if (a.kind === 'player') return a.id === b.id;
     return a.ref === b.ref;
   }
 
   function targetMesh(t) {
     if (!t) return null;
     if (t.kind === 'boss') return bossAlive[t.index] ? bossMeshes[t.index] : null;
+    if (t.kind === 'player') return (ghosts[t.id] && ghosts[t.id].pvp) ? ghosts[t.id].mesh : null;
     return t.ref.alive ? t.ref.mesh : null;
   }
 
@@ -1299,6 +1551,11 @@ GAME_HTML = r"""
       if (bossMeshes[i] && bossAlive[i]) candidates.push({ kind: 'boss', index: i });
     }
     enemies.forEach(e => { if (e.alive) candidates.push({ kind: 'enemy', ref: e }); });
+    if (pvpEnabled) {
+      Object.keys(ghosts).forEach(id => {
+        if (ghosts[id].pvp) candidates.push({ kind: 'player', id: id });
+      });
+    }
 
     let best = null, bestScore = -Infinity;
     candidates.forEach(c => {
@@ -1346,8 +1603,8 @@ GAME_HTML = r"""
         const bolt = makeMissile(boltColor, isBlast);
         bolt.position.copy(player.position).add(new THREE.Vector3(0, 0.6, 0));
         scene.add(bolt);
-        const dmg = isBlast ? (26 + Math.floor(Math.random() * 14)) :
-          (target.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10)));
+        const dmg = Math.round((isBlast ? (26 + Math.floor(Math.random() * 14)) :
+          (target.kind === 'boss' ? (15 + Math.floor(Math.random() * 16)) : (12 + Math.floor(Math.random() * 10)))) * dmgMultiplier());
         activeBolts.push({ mesh: bolt, dmg, target: target, lastPuff: now, blast: isBlast });
         return;
       }
@@ -1365,7 +1622,7 @@ GAME_HTML = r"""
     bolt.position.copy(muzzlePos);
     orientMissile(bolt, dir);
     scene.add(bolt);
-    const dmg = isBlast ? (26 + Math.floor(Math.random() * 14)) : (10 + Math.floor(Math.random() * 9));
+    const dmg = Math.round((isBlast ? (26 + Math.floor(Math.random() * 14)) : (10 + Math.floor(Math.random() * 9))) * dmgMultiplier());
     freeBolts.push({ mesh: bolt, dir: dir.clone(), dmg, born: now, lastPuff: now, blast: isBlast });
   }
 
@@ -1382,7 +1639,7 @@ GAME_HTML = r"""
     bullet.position.copy(muzzlePos);
     orientMissile(bullet, dir);
     scene.add(bullet);
-    const dmg = 5 + Math.floor(Math.random() * 5);
+    const dmg = Math.round((5 + Math.floor(Math.random() * 5)) * dmgMultiplier());
     bullets.push({ mesh: bullet, dir: dir.clone(), dmg, born: now });
   }
 
@@ -1395,16 +1652,30 @@ GAME_HTML = r"""
   function weaponLabelText() {
     return WEAPON_ICONS[currentWeapon] + ' Weapon: ' + WEAPON_LABELS[currentWeapon] + ' (' + WEAPON_KEYS[currentWeapon] + ')' + (rapidFire ? ' ⚡ RAPID' : '');
   }
+  const WEAPON_HAND_COLORS = { bullet: 0xfff2b0, missile: 0x7cf7ff, blast: 0xff8844 };
   function switchWeapon(w) {
     if (currentWeapon === w) return;
     currentWeapon = w;
     weaponEl.textContent = weaponLabelText();
     msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
+    if (humanVisual && humanVisual.userData.handWeaponAccent) {
+      const c = WEAPON_HAND_COLORS[w];
+      humanVisual.userData.handWeaponAccent.color.setHex(c);
+      humanVisual.userData.handWeaponAccent.emissive.setHex(c);
+    }
   }
   function toggleRapidFire() {
     rapidFire = !rapidFire;
     weaponEl.textContent = weaponLabelText();
     msgEl.textContent = rapidFire ? 'Rapid fire engaged — hold E to unload.' : 'Rapid fire disengaged.';
+  }
+
+  function togglePvp() {
+    pvpEnabled = !pvpEnabled;
+    pvpEl.textContent = '⚔ PvP: ' + (pvpEnabled ? 'ON' : 'OFF') + ' (P)';
+    pvpEl.style.color = pvpEnabled ? '#fb7185' : '#94a3b8';
+    pvpEl.style.borderColor = pvpEnabled ? 'rgba(251,113,133,0.5)' : 'rgba(148,163,184,0.3)';
+    msgEl.textContent = pvpEnabled ? 'PvP enabled — you can now hit (and be hit by) other players who also have it on.' : 'PvP disabled.';
   }
 
   function tryDamageNearestBoss(pos, radius, dmg) {
@@ -1425,6 +1696,21 @@ GAME_HTML = r"""
       }
     }
     return -1;
+  }
+
+  function tryDamageNearbyPlayer(pos, radius, dmg) {
+    if (!pvpEnabled) return null;
+    for (const id of Object.keys(ghosts)) {
+      const g = ghosts[id];
+      if (!g.pvp) continue;
+      if (pos.distanceTo(g.mesh.position) < radius) {
+        pendingPvpDamage[id] = (pendingPvpDamage[id] || 0) + dmg;
+        flashMesh(g.mesh);
+        msgEl.textContent = 'Hit ' + (g.name || 'a drifter') + ' for ' + dmg + '!';
+        return id;
+      }
+    }
+    return null;
   }
 
   function updateBullets(dt) {
@@ -1452,6 +1738,9 @@ GAME_HTML = r"""
             break;
           }
         }
+      }
+      if (!hit && pvpEnabled) {
+        hit = tryDamageNearbyPlayer(b.mesh.position, BULLET_ENEMY_RADIUS, b.dmg) !== null;
       }
 
       if (hit || now - b.born > BULLET_LIFETIME) {
@@ -1534,6 +1823,13 @@ GAME_HTML = r"""
           }
         }
       }
+      if (!hit && pvpEnabled) {
+        const hitId = tryDamageNearbyPlayer(b.mesh.position, FREE_BOLT_ENEMY_RADIUS, b.dmg);
+        if (hitId !== null) {
+          if (b.blast) explodeSplash(b.mesh.position.clone(), b.dmg, false, null);
+          hit = true;
+        }
+      }
 
       if (hit || now - b.born > FREE_BOLT_LIFETIME) {
         scene.remove(b.mesh);
@@ -1572,6 +1868,14 @@ GAME_HTML = r"""
             msgEl.textContent = 'The ' + bossTypeOf(bi).name + ' shatters! It will reform shortly, stronger than before.';
           }
           if (b.blast) explodeSplash(impactPos, b.dmg, bi, null);
+        } else if (b.target.kind === 'player') {
+          const id = b.target.id;
+          if (ghosts[id] && ghosts[id].pvp) {
+            pendingPvpDamage[id] = (pendingPvpDamage[id] || 0) + b.dmg;
+            flashMesh(ghosts[id].mesh);
+            msgEl.textContent = 'Hit ' + (ghosts[id].name || 'a drifter') + ' for ' + b.dmg + '!';
+          }
+          if (b.blast) explodeSplash(impactPos, b.dmg, false, null);
         } else {
           const e = b.target.ref;
           e.hp = Math.max(0, e.hp - b.dmg);
@@ -1618,6 +1922,9 @@ GAME_HTML = r"""
       }
       ghosts[pl.id].target = { x: pl.x, y: pl.y, z: pl.z, yaw: pl.yaw || 0 };
       ghosts[pl.id].name = pl.name;
+      ghosts[pl.id].color = pl.color;
+      ghosts[pl.id].pvp = !!pl.pvp;
+      ghosts[pl.id].id = pl.id;
     });
     Object.keys(ghosts).forEach(id => {
       if (!seen[id]) {
@@ -1658,7 +1965,7 @@ GAME_HTML = r"""
       if (keys['s'] || keys['arrowdown']) move.sub(lookForward);
       if (keys['d'] || keys['arrowright']) move.add(flatRight);
       if (keys['a'] || keys['arrowleft']) move.sub(flatRight);
-      if (move.lengthSq() > 0) move.normalize().multiplyScalar(MOVE_SPEED * FLY_SPEED_MULT);
+      if (move.lengthSq() > 0) move.normalize().multiplyScalar(MOVE_SPEED * FLY_SPEED_MULT * speedMultiplier());
       if (keys[' ']) move.y += MOVE_SPEED * 1.6;
       if (keys['shift']) move.y -= MOVE_SPEED * 1.6;
 
@@ -1679,7 +1986,7 @@ GAME_HTML = r"""
     if (keys['d'] || keys['arrowright']) move.add(flatRight);
     if (keys['a'] || keys['arrowleft']) move.sub(flatRight);
     if (move.lengthSq() > 0) {
-      move.normalize().multiplyScalar(MOVE_SPEED);
+      move.normalize().multiplyScalar(MOVE_SPEED * speedMultiplier());
       player.position.x += move.x * dt;
       player.position.z += move.z * dt;
       const targetAngle = Math.atan2(move.x, move.z);
@@ -1739,6 +2046,8 @@ GAME_HTML = r"""
         scene.remove(o);
         orbs.splice(i, 1);
         collected++;
+        currency++;
+        saveShopData();
         orbsEl.textContent = '✨ Orbs: ' + collected + ' / ' + ORB_TOTAL;
       }
     }
@@ -1780,7 +2089,7 @@ GAME_HTML = r"""
   }
 
   function updateHudStatic() {
-    hpEl.textContent = '❤ HP: ' + Math.round(myHp);
+    hpEl.textContent = '❤ HP: ' + Math.round(myHp) + ' / ' + currentMaxHp();
   }
 
   function heartbeat() {
@@ -1788,11 +2097,13 @@ GAME_HTML = r"""
       const payload = {
         player: {
           x: player.position.x, y: player.position.y, z: player.position.z,
-          yaw: player.rotation.y, hp: myHp
+          yaw: player.rotation.y, hp: myHp, pvp: pvpEnabled
         },
-        boss_damage: pendingBossDamage
+        boss_damage: pendingBossDamage,
+        pvp_damage: pendingPvpDamage
       };
       pendingBossDamage = {};
+      pendingPvpDamage = {};
       const doc = window.parent.document;
       const inp = doc.querySelector('textarea[aria-label="od_sync_data"]');
       if (inp) {
@@ -1813,6 +2124,7 @@ GAME_HTML = r"""
     const dt = Math.min(clock.getDelta(), 0.05);
     updatePlayer(dt);
     safeZoneEl.style.display = onIsland ? 'block' : 'none';
+    updateMinimap();
     updateCamera();
     updateGhosts(dt);
     updateBolts(dt);
@@ -1850,6 +2162,9 @@ GAME_HTML = r"""
     started = true;
     canvas.focus();
   });
+
+  shopBtn.addEventListener('click', () => toggleShop());
+  shopCloseBtn.addEventListener('click', () => toggleShop());
 
   init();
 })();
