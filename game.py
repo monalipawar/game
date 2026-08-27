@@ -596,7 +596,8 @@ GAME_HTML = r"""
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xe8b892, roughness: 0.7 });
     const visorMat = new THREE.MeshStandardMaterial({ color: 0x0a2a33, emissive: 0x2dd4bf, emissiveIntensity: 0.8, metalness: 0.6, roughness: 0.2 });
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.32, 0.7, 4, 8) : new THREE.CylinderGeometry(0.32, 0.28, 1, 8), suitMat);
+    const hasCapsule = typeof THREE.CapsuleGeometry === 'function';
+    const torso = new THREE.Mesh(hasCapsule ? new THREE.CapsuleGeometry(0.32, 0.7, 4, 8) : new THREE.CylinderGeometry(0.32, 0.28, 1, 8), suitMat);
     torso.position.set(0, 0.15, 0);
     group.add(torso);
 
@@ -614,7 +615,7 @@ GAME_HTML = r"""
     visor.scale.set(1, 0.7, 0.6);
     group.add(visor);
 
-    const armGeo = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.09, 0.55, 4, 6) : new THREE.CylinderGeometry(0.09, 0.09, 0.7, 6);
+    const armGeo = hasCapsule ? new THREE.CapsuleGeometry(0.09, 0.55, 4, 6) : new THREE.CylinderGeometry(0.09, 0.09, 0.7, 6);
     const armL = new THREE.Mesh(armGeo, suitMat);
     armL.position.set(-0.42, 0.1, 0);
     armL.rotation.z = 0.18;
@@ -624,7 +625,7 @@ GAME_HTML = r"""
     armR.rotation.z = -0.18;
     group.add(armR);
 
-    const legGeo = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.11, 0.6, 4, 6) : new THREE.CylinderGeometry(0.11, 0.11, 0.75, 6);
+    const legGeo = hasCapsule ? new THREE.CapsuleGeometry(0.11, 0.6, 4, 6) : new THREE.CylinderGeometry(0.11, 0.11, 0.75, 6);
     const legL = new THREE.Mesh(legGeo, suitMat);
     legL.position.set(-0.15, -0.6, 0);
     group.add(legL);
@@ -1594,7 +1595,7 @@ GAME_HTML = r"""
   }
 
   function makeGhost(pl) {
-    const geo = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.5, 1, 4, 8) : new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
+    const geo = typeof THREE.CapsuleGeometry === 'function' ? new THREE.CapsuleGeometry(0.5, 1, 4, 8) : new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
     const mat = new THREE.MeshStandardMaterial({ color: pl.color || '#a78bfa', transparent: true, opacity: 0.85 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(pl.x, pl.y, pl.z);
