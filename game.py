@@ -546,36 +546,144 @@ let unlockedWeapons = {
   function shieldDurationBonus() { return upgrades.shieldBoost * 1; }
 
   function renderShop() {
-    shopCurrencyEl.textContent = currency;
-    shopItemsEl.innerHTML = '';
-    SHOP_ITEMS.forEach(item => {
-      const level = upgrades[item.key] || 0;
-      const maxed = level >= item.max;
-      const cost = item.cost + level * 6;
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:12px; background:rgba(255,255,255,0.04); border-radius:12px; padding:10px 14px;';
-      const info = document.createElement('div');
-      info.innerHTML = '<div style="font-weight:600;">' + item.name + ' <span style="color:#94a3b8; font-weight:400;">(Lv ' + level + '/' + item.max + ')</span></div>' +
-        '<div style="font-size:0.78rem; color:#a9a4d0;">' + item.desc + '</div>';
-      row.appendChild(info);
-      const btn = document.createElement('button');
-      btn.textContent = maxed ? 'MAXED' : ('Buy · ✨' + cost);
-      btn.disabled = maxed || currency < cost;
-      btn.style.cssText = 'padding:8px 16px; border-radius:10px; border:none; cursor:pointer; font-family:Outfit,sans-serif; font-weight:600; white-space:nowrap; color:#04030d; background:' +
-        (maxed ? '#555' : (currency < cost ? '#555' : 'linear-gradient(90deg,#7cf7ff,#a78bfa)'));
-      btn.addEventListener('click', () => {
-        if (maxed || currency < cost) return;
-        currency -= cost;
-        upgrades[item.key] = level + 1;
-        saveShopData();
-        applyUpgrades();
-        renderShop();
-        msgEl.textContent = 'Purchased ' + item.name + '!';
-      });
-      row.appendChild(btn);
-      shopItemsEl.appendChild(row);
+  shopCurrencyEl.textContent = currency;
+  shopItemsEl.innerHTML = '';
+
+  // =========================
+  // WEAPONS
+  // =========================
+
+  Object.keys(WEAPON_PRICES).forEach(weapon => {
+    const owned = unlockedWeapons[weapon];
+    const price = WEAPON_PRICES[weapon];
+
+    const row = document.createElement('div');
+
+    row.style.cssText =
+      'display:flex; justify-content:space-between; align-items:center; gap:12px;' +
+      'background:rgba(255,255,255,0.04); border-radius:12px; padding:10px 14px;';
+
+    const info = document.createElement('div');
+
+    const weaponIcons = {
+      bullet: '🔫',
+      missile: '🚀',
+      blast: '💥'
+    };
+
+    info.innerHTML =
+      '<div style="font-weight:600;">' +
+      weaponIcons[weapon] + ' ' + WEAPON_LABELS[weapon] +
+      '</div>' +
+      '<div style="font-size:0.78rem; color:#a9a4d0;">' +
+      (weapon === 'bullet'
+        ? 'Basic weapon. Fires straight.'
+        : weapon === 'missile'
+        ? 'Locks onto enemies and follows them.'
+        : 'Explodes and damages enemies nearby.') +
+      '</div>';
+
+    row.appendChild(info);
+
+    const btn = document.createElement('button');
+
+    if (owned) {
+      btn.textContent = 'OWNED';
+      btn.disabled = true;
+    } else {
+      btn.textContent = 'Buy · ✨' + price;
+      btn.disabled = currency < price;
+    }
+
+    btn.style.cssText =
+      'padding:8px 16px; border-radius:10px; border:none;' +
+      'cursor:pointer; font-family:Outfit,sans-serif; font-weight:600;' +
+      'white-space:nowrap; color:#04030d; background:' +
+      (owned || currency < price
+        ? '#555'
+        : 'linear-gradient(90deg,#7cf7ff,#a78bfa)');
+
+    btn.addEventListener('click', () => {
+      if (owned || currency < price) return;
+
+      currency -= price;
+      unlockedWeapons[weapon] = true;
+
+      saveShopData();
+      renderShop();
+
+      msgEl.textContent =
+        'Purchased ' + WEAPON_LABELS[weapon] + '!';
     });
-  }
+
+    row.appendChild(btn);
+    shopItemsEl.appendChild(row);
+  });
+
+  // =========================
+  // UPGRADES
+  // =========================
+
+  SHOP_ITEMS.forEach(item => {
+    const level = upgrades[item.key] || 0;
+    const maxed = level >= item.max;
+    const cost = item.cost + level * 6;
+
+    const row = document.createElement('div');
+
+    row.style.cssText =
+      'display:flex; justify-content:space-between; align-items:center; gap:12px;' +
+      'background:rgba(255,255,255,0.04); border-radius:12px; padding:10px 14px;';
+
+    const info = document.createElement('div');
+
+    info.innerHTML =
+      '<div style="font-weight:600;">' +
+      item.name +
+      ' <span style="color:#94a3b8; font-weight:400;">(Lv ' +
+      level + '/' + item.max + ')</span></div>' +
+      '<div style="font-size:0.78rem; color:#a9a4d0;">' +
+      item.desc +
+      '</div>';
+
+    row.appendChild(info);
+
+    const btn = document.createElement('button');
+
+    btn.textContent =
+      maxed ? 'MAXED' : ('Buy · ✨' + cost);
+
+    btn.disabled =
+      maxed || currency < cost;
+
+    btn.style.cssText =
+      'padding:8px 16px; border-radius:10px; border:none;' +
+      'cursor:pointer; font-family:Outfit,sans-serif; font-weight:600;' +
+      'white-space:nowrap; color:#04030d; background:' +
+      (maxed
+        ? '#555'
+        : (currency < cost
+          ? '#555'
+          : 'linear-gradient(90deg,#7cf7ff,#a78bfa)'));
+
+    btn.addEventListener('click', () => {
+      if (maxed || currency < cost) return;
+
+      currency -= cost;
+      upgrades[item.key] = level + 1;
+
+      saveShopData();
+      applyUpgrades();
+      renderShop();
+
+      msgEl.textContent =
+        'Purchased ' + item.name + '!';
+    });
+
+    row.appendChild(btn);
+    shopItemsEl.appendChild(row);
+  });
+}
 
   function applyUpgrades() {
     const newMax = currentMaxHp();
