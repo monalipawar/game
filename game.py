@@ -1333,7 +1333,16 @@ let unlockedWeapons = {
     metalness: 0.8,
     roughness: 0.25
   });
+function rebuildGunViewmodel() {
+  if (gunGroup) {
+    camera.remove(gunGroup);
+  }
 
+  gunGroup = null;
+  gunMuzzle = null;
+
+  buildGunViewmodel();
+}
   // =========================
   // 1 — BASIC BULLET GUN
   // =========================
