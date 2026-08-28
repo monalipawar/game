@@ -417,7 +417,7 @@ GAME_HTML = r"""
   let flying = false;
   let scoping = false;
   let pvpEnabled = false;
-  let currency = 0;
+  let currency = 150;
   let upgrades = { maxHpBoost: 0, dmgBoost: 0, speedBoost: 0, shieldBoost: 0 };
   const SHOP_ITEMS = [
     { key: 'maxHpBoost', name: '+20 Max HP', desc: 'Permanently raises your maximum health.', cost: 15, max: 5 },
