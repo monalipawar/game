@@ -868,6 +868,9 @@ let unlockedWeapons = {
         if (k === '1') switchWeapon('bullet');
         if (k === '2') switchWeapon('missile');
         if (k === '3') switchWeapon('blast');
+        if (k === '4') switchWeapon('plasma');
+        if (k === '5') switchWeapon('rapid');
+        if (k === '6') switchWeapon('heavy');
         if (k === '4') toggleRapidFire();
         if (k === 'p') togglePvp();
         if (k === 'b') toggleShop();
