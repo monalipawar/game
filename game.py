@@ -534,48 +534,44 @@ let unlockedWeapons = {
     try { localStorage.setItem('orbitdrift_best', t.toString()); } catch(e) {}
     bestEl.textContent = t.toFixed(2) + 's';
   }
-
-  function loadShopData() {
-    try {
-      const c = localStorage.getItem('orbitdrift_currency');
-      currency = c ? parseInt(c, 10) : 0;
-      const u = localStorage.getItem('orbitdrift_upgrades');
-      if (u) upgrades = Object.assign(upgrades, JSON.parse(u));
-    } catch(e) {}
-  }
-  function saveShopData() {
-  const saved = localStorage.getItem('orbitdrift_shop');
-
-if (saved) {
+function loadShopData() {
   try {
-    const data = JSON.parse(saved);
+    const c = localStorage.getItem('orbitdrift_currency');
 
-    currency = Number(data.currency ?? 150);
-
-    if (data.upgrades) {
-      upgrades = {
-        ...upgrades,
-        ...data.upgrades
-      };
+    if (c === null) {
+      // First time playing
+      currency = 150;
+    } else {
+      currency = parseInt(c, 10);
     }
 
-    if (data.unlockedWeapons) {
-      unlockedWeapons = {
-        ...unlockedWeapons,
-        ...data.unlockedWeapons
-      };
+    const u = localStorage.getItem('orbitdrift_upgrades');
+    if (u) {
+      upgrades = Object.assign(upgrades, JSON.parse(u));
     }
-  } catch (e) {
+
+    const w = localStorage.getItem('orbitdrift_unlockedWeapons');
+    if (w) {
+      unlockedWeapons = Object.assign(unlockedWeapons, JSON.parse(w));
+    }
+
+  } catch(e) {
     console.warn('Could not load shop data:', e);
     currency = 150;
   }
-} else {
-  // First time playing
-  currency = 150;
-  saveShopData();
 }
 
-  function currentMaxHp() { return 100 + upgrades.maxHpBoost * 20; }
+function saveShopData() {
+  try {
+    localStorage.setItem('orbitdrift_currency', String(currency));
+    localStorage.setItem('orbitdrift_upgrades', JSON.stringify(upgrades));
+    localStorage.setItem('orbitdrift_unlockedWeapons', JSON.stringify(unlockedWeapons));
+  } catch(e) {
+    console.warn('Could not save shop data:', e);
+  }
+}
+  
+    function currentMaxHp() { return 100 + upgrades.maxHpBoost * 20; }
   function dmgMultiplier() { return 1 + upgrades.dmgBoost * 0.1; }
   function speedMultiplier() { return 1 + upgrades.speedBoost * 0.08; }
   function shieldDurationBonus() { return upgrades.shieldBoost * 1; }
