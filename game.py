@@ -1151,7 +1151,7 @@ function saveShopData() {
       orbs.push(m);
     }
     ORB_TOTAL = orbs.length;
-    orbsEl.textContent = '✨ Orbs: 0 / ' + ORB_TOTAL;
+    orbsEl.textContent = '✨ Orbs: ' + currency;
   }
 
   function buildRace() {
