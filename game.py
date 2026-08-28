@@ -2003,21 +2003,33 @@ function rebuildGunViewmodel() {
   function switchWeapon(w) {
   if (!unlockedWeapons[w]) {
     const price = WEAPON_PRICES[w];
-    msgEl.textContent = '🔒 ' + WEAPON_LABELS[w] + ' costs ' + price + ' Orbs. Open the shop with B!';
+    msgEl.textContent =
+      '🔒 ' + WEAPON_LABELS[w] +
+      ' costs ' + price + ' Orbs. Open the shop with B!';
     return;
   }
 
-  if (currentWeapon === w) return;
   currentWeapon = w;
-  rebuildGunViewmodel();
-    weaponEl.textContent = weaponLabelText();
-    msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
-    if (humanVisual && humanVisual.userData.handWeaponAccent) {
-      const c = WEAPON_HAND_COLORS[w];
-      humanVisual.userData.handWeaponAccent.color.setHex(c);
-      humanVisual.userData.handWeaponAccent.emissive.setHex(c);
-    }
+
+  // Remove the old gun
+  if (gunGroup) {
+    camera.remove(gunGroup);
+    gunGroup = null;
+    gunMuzzle = null;
   }
+
+  // Build the new gun
+  buildGunViewmodel();
+
+  weaponEl.textContent = weaponLabelText();
+  msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
+
+  if (humanVisual && humanVisual.userData.handWeaponAccent) {
+    const c = WEAPON_HAND_COLORS[w];
+    humanVisual.userData.handWeaponAccent.color.setHex(c);
+    humanVisual.userData.handWeaponAccent.emissive.setHex(c);
+  }
+}
   function toggleRapidFire() {
     rapidFire = !rapidFire;
     weaponEl.textContent = weaponLabelText();
