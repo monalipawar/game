@@ -1994,8 +1994,12 @@ let unlockedWeapons = {
       if (keys['shift']) move.y -= MOVE_SPEED * 1.6;
 
       player.position.addScaledVector(move, dt);
-      playerVel.set(0, 0, 0);
-      onGround = false;
+
+// Keep the player completely weightless while flying
+playerVel.x = 0;
+playerVel.y = 0;
+playerVel.z = 0;
+onGround = false;
 
       if (move.lengthSq() > 0.001) {
         const targetAngle = Math.atan2(move.x, move.z);
