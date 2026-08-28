@@ -1523,6 +1523,41 @@ function rebuildGunViewmodel() {
     grip.rotation.x = 0.25;
     group.add(grip);
   }
+  
+function buildRapidGun() {
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.22, 0.6),
+    dark
+  );
+  body.position.z = -0.05;
+  group.add(body);
+
+  // Four rapid-fire barrels
+  [-0.12, -0.04, 0.04, 0.12].forEach(x => {
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.045, 0.65, 8),
+      accent
+    );
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(x, 0, -0.62);
+    group.add(barrel);
+  });
+
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 12, 12),
+    accent
+  );
+  core.position.set(0, 0.02, -0.98);
+  group.add(core);
+
+  const grip = new THREE.Mesh(
+    new THREE.BoxGeometry(0.16, 0.3, 0.15),
+    dark
+  );
+  grip.position.set(0, -0.2, 0.1);
+  grip.rotation.x = 0.25;
+  group.add(grip);
+}
 
   // =========================
   // 6 — HEAVY CANNON
