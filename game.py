@@ -500,8 +500,12 @@ const WEAPON_PRICES = {
 let unlockedWeapons = {
   bullet: true,
   missile: false,
-  blast: false
+  blast: false,
+  plasma: false,
+  rapid: false,
+  heavy: false
 };
+
   const BULLET_COOLDOWN = 0.18;
   const BULLET_SPEED = 220;
   const BULLET_LIFETIME = 1.4;
