@@ -974,7 +974,7 @@ GAME_HTML = r"""
   }
 
   function buildOrbs() {
-    const orbGeo = new THREE.OctahedronGeometry(0.4, 0);
+    const orbGeo = new THREE.OctahedronGeometry(0.8, 0);
     const orbMat = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0x996600, emissiveIntensity: 0.6 });
     islands.forEach(isl => {
       const m = new THREE.Mesh(orbGeo, orbMat.clone());
