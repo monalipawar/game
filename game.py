@@ -2495,7 +2495,7 @@ onGround = false;
         collected++;
         currency++;
         saveShopData();
-        orbsEl.textContent = '✨ Orbs: ' + collected + ' / ' + ORB_TOTAL;
+        orbsEl.textContent = '✨ Orbs: ' + currency;
       }
     }
   }
