@@ -542,7 +542,7 @@ function loadShopData() {
       // First time playing
       currency = 150;
     } else {
-      currency = parseInt(c, 10);
+      currency = c === null ? 150 : parseInt(c, 10);
     }
 
     const u = localStorage.getItem('orbitdrift_upgrades');
