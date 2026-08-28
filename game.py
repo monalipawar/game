@@ -1312,44 +1312,256 @@ let unlockedWeapons = {
     }
   }
   function buildGunViewmodel() {
-    const group = new THREE.Group();
-    const metal = new THREE.MeshStandardMaterial({ color: 0x2a2f45, metalness: 0.7, roughness: 0.35 });
-    const accent = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x2dd4bf, emissiveIntensity: 0.9, metalness: 0.4, roughness: 0.3 });
+  const group = new THREE.Group();
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.55), metal);
+  const metal = new THREE.MeshStandardMaterial({
+    color: 0x2a2f45,
+    metalness: 0.7,
+    roughness: 0.35
+  });
+
+  const accent = new THREE.MeshStandardMaterial({
+    color: 0x7cf7ff,
+    emissive: 0x2dd4bf,
+    emissiveIntensity: 0.9,
+    metalness: 0.4,
+    roughness: 0.3
+  });
+
+  const dark = new THREE.MeshStandardMaterial({
+    color: 0x111525,
+    metalness: 0.8,
+    roughness: 0.25
+  });
+
+  // =========================
+  // 1 — BASIC BULLET GUN
+  // =========================
+  function buildBulletGun() {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.14, 0.55), metal
+    );
     body.position.set(0, 0, -0.1);
     group.add(body);
 
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.4, 10), metal);
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.055, 0.4, 10), metal
+    );
     barrel.rotation.x = Math.PI / 2;
     barrel.position.set(0, 0.01, -0.55);
     group.add(barrel);
 
-    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.08, 10), accent);
+    const tip = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.045, 0.08, 10), accent
+    );
     tip.rotation.x = Math.PI / 2;
     tip.position.set(0, 0.01, -0.76);
     group.add(tip);
 
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.28, 0.12), metal);
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.11, 0.28, 0.12), metal
+    );
     grip.position.set(0, -0.18, 0.12);
     grip.rotation.x = 0.25;
     group.add(grip);
 
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.03, 0.2), accent);
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.17, 0.03, 0.2), accent
+    );
     stripe.position.set(0, 0.06, -0.05);
     group.add(stripe);
-
-    gunBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
-    group.position.copy(gunBasePos);
-    group.rotation.y = -0.05;
-    camera.add(group);
-    gunGroup = group;
-
-    gunMuzzle = new THREE.Object3D();
-    gunMuzzle.position.set(0, 0.01, -0.8);
-    group.add(gunMuzzle);
   }
 
+  // =========================
+  // 2 — RAPID FIRE GUN
+  // =========================
+  function buildRapidGun() {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.18, 0.5), dark
+    );
+    body.position.z = -0.1;
+    group.add(body);
+
+    // Three barrels
+    [-0.07, 0, 0.07].forEach(x => {
+      const barrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.035, 0.045, 0.55, 8),
+        metal
+      );
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(x, 0, -0.55);
+      group.add(barrel);
+    });
+
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.13, 0.3, 0.14), dark
+    );
+    grip.position.set(0, -0.2, 0.1);
+    grip.rotation.x = 0.25;
+    group.add(grip);
+  }
+
+  // =========================
+  // 3 — MISSILE LAUNCHER
+  // =========================
+  function buildMissileGun() {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.22, 0.6), dark
+    );
+    body.position.z = -0.05;
+    group.add(body);
+
+    // Missile tube
+    const tube = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.12, 0.7, 12),
+      metal
+    );
+    tube.rotation.x = Math.PI / 2;
+    tube.position.z = -0.55;
+    group.add(tube);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.12, 0.025, 8, 16),
+      accent
+    );
+    ring.position.z = -0.9;
+    group.add(ring);
+
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 0.3, 0.15), dark
+    );
+    grip.position.set(0, -0.2, 0.1);
+    grip.rotation.x = 0.25;
+    group.add(grip);
+  }
+
+  // =========================
+  // 4 — BLAST CANNON
+  // =========================
+  function buildBlastGun() {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.25, 0.55), dark
+    );
+    body.position.z = -0.05;
+    group.add(body);
+
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.12, 0.55, 12),
+      accent
+    );
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = -0.55;
+    group.add(barrel);
+
+    const muzzle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.15, 0.12, 12),
+      metal
+    );
+    muzzle.rotation.x = Math.PI / 2;
+    muzzle.position.z = -0.86;
+    group.add(muzzle);
+
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.32, 0.16), dark
+    );
+    grip.position.set(0, -0.2, 0.1);
+    grip.rotation.x = 0.25;
+    group.add(grip);
+  }
+
+  // =========================
+  // 5 — PLASMA CANNON
+  // =========================
+  function buildPlasmaGun() {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.25, 0.22, 0.65), metal
+    );
+    body.position.z = -0.05;
+    group.add(body);
+
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.09, 0.11, 0.75, 12),
+      accent
+    );
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = -0.65;
+    group.add(barrel);
+
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 12, 12),
+      accent
+    );
+    core.position.z = -1.02;
+    group.add(core);
+
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.3, 0.15), dark
+    );
+    grip.position.set(0, -0.2, 0.12);
+    grip.rotation.x = 0.25;
+    group.add(grip);
+  }
+
+  // =========================
+  // 6 — HEAVY CANNON
+  // =========================
+  function buildHeavyGun() {
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, 0.3, 0.7), dark
+    );
+    body.position.z = -0.02;
+    group.add(body);
+
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.16, 0.8, 12),
+      metal
+    );
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = -0.7;
+    group.add(barrel);
+
+    const muzzle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.23, 0.19, 0.14, 12),
+      accent
+    );
+    muzzle.rotation.x = Math.PI / 2;
+    muzzle.position.z = -1.12;
+    group.add(muzzle);
+
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.35, 0.18), dark
+    );
+    grip.position.set(0, -0.23, 0.15);
+    grip.rotation.x = 0.25;
+    group.add(grip);
+  }
+
+  // Build the currently selected gun
+  if (currentWeapon === 'bullet') {
+    buildBulletGun();
+  } else if (currentWeapon === 'missile') {
+    buildMissileGun();
+  } else if (currentWeapon === 'blast') {
+    buildBlastGun();
+  } else if (currentWeapon === 'plasma') {
+    buildPlasmaGun();
+  } else if (currentWeapon === 'heavy') {
+    buildHeavyGun();
+  } else {
+    buildBulletGun();
+  }
+
+  gunBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
+  group.position.copy(gunBasePos);
+  group.rotation.y = -0.05;
+
+  camera.add(group);
+  gunGroup = group;
+
+  gunMuzzle = new THREE.Object3D();
+  gunMuzzle.position.set(0, 0.01, -1.0);
+  group.add(gunMuzzle);
+}
   function updateGunViewmodel(dt) {
     if (!gunGroup) return;
     const now = performance.now() / 1000;
