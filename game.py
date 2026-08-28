@@ -1593,7 +1593,7 @@ function buildRapidGun() {
     group.add(grip);
   }
 
-  if (currentWeapon === 'bullet') {
+ if (currentWeapon === 'bullet') {
   buildBulletGun();
 }
 
@@ -1605,6 +1605,17 @@ if (currentWeapon === 'blast') {
   buildBlastGun();
 }
 
+if (currentWeapon === 'plasma') {
+  buildPlasmaGun();
+}
+
+if (currentWeapon === 'rapid') {
+  buildRapidGun();
+}
+
+if (currentWeapon === 'heavy') {
+  buildHeavyGun();
+}
   gunBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
   group.position.copy(gunBasePos);
   group.rotation.y = -0.05;
