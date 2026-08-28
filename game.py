@@ -482,7 +482,10 @@ const RAPID_MULT = 0.32;
 const WEAPON_LABELS = {
   bullet: 'Bullets',
   missile: 'Target Missiles',
-  blast: 'Blast Missiles'
+  blast: 'Blast Missiles',
+  plasma: 'Plasma Cannon',
+  rapid: 'Rapid Cannon',
+  heavy: 'Heavy Cannon'
 };
 
 const WEAPON_PRICES = {
