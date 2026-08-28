@@ -544,11 +544,13 @@ let unlockedWeapons = {
     } catch(e) {}
   }
   function saveShopData() {
-    try {
-      localStorage.setItem('orbitdrift_currency', String(currency));
-      localStorage.setItem('orbitdrift_upgrades', JSON.stringify(upgrades));
-    } catch(e) {}
-  }
+  localStorage.setItem('orbitdrift_shop', JSON.stringify({
+    currency: currency,
+    upgrades: upgrades,
+    unlockedWeapons: unlockedWeapons,
+    started: true
+  }));
+}
 
   function currentMaxHp() { return 100 + upgrades.maxHpBoost * 20; }
   function dmgMultiplier() { return 1 + upgrades.dmgBoost * 0.1; }
