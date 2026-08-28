@@ -544,12 +544,35 @@ let unlockedWeapons = {
     } catch(e) {}
   }
   function saveShopData() {
-  localStorage.setItem('orbitdrift_shop', JSON.stringify({
-    currency: currency,
-    upgrades: upgrades,
-    unlockedWeapons: unlockedWeapons,
-    started: true
-  }));
+  const saved = localStorage.getItem('orbitdrift_shop');
+
+if (saved) {
+  try {
+    const data = JSON.parse(saved);
+
+    currency = Number(data.currency ?? 150);
+
+    if (data.upgrades) {
+      upgrades = {
+        ...upgrades,
+        ...data.upgrades
+      };
+    }
+
+    if (data.unlockedWeapons) {
+      unlockedWeapons = {
+        ...unlockedWeapons,
+        ...data.unlockedWeapons
+      };
+    }
+  } catch (e) {
+    console.warn('Could not load shop data:', e);
+    currency = 150;
+  }
+} else {
+  // First time playing
+  currency = 150;
+  saveShopData();
 }
 
   function currentMaxHp() { return 100 + upgrades.maxHpBoost * 20; }
