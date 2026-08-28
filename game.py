@@ -2000,6 +2000,7 @@ let unlockedWeapons = {
 
   if (currentWeapon === w) return;
   currentWeapon = w;
+  rebuildGunViewmodel();
     weaponEl.textContent = weaponLabelText();
     msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
     if (humanVisual && humanVisual.userData.handWeaponAccent) {
