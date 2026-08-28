@@ -491,7 +491,10 @@ const WEAPON_LABELS = {
 const WEAPON_PRICES = {
   bullet: 0,
   missile: 20,
-  blast: 35
+  blast: 35,
+  plasma: 50,
+  rapid: 65,
+  heavy: 80
 };
 
 let unlockedWeapons = {
