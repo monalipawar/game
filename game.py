@@ -2042,7 +2042,7 @@ GAME_HTML = r"""
   function checkOrbs() {
     for (let i = orbs.length - 1; i >= 0; i--) {
       const o = orbs[i];
-      if (player.position.distanceTo(o.position) < 1.3) {
+      if (player.position.distanceTo(o.position) < 3.5) {
         scene.remove(o);
         orbs.splice(i, 1);
         collected++;
