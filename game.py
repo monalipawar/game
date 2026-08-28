@@ -566,11 +566,10 @@ function saveShopData() {
     localStorage.setItem('orbitdrift_currency', String(currency));
     localStorage.setItem('orbitdrift_upgrades', JSON.stringify(upgrades));
     localStorage.setItem('orbitdrift_unlockedWeapons', JSON.stringify(unlockedWeapons));
-  } catch(e) {
+  } catch (e) {
     console.warn('Could not save shop data:', e);
   }
 }
-  
     function currentMaxHp() { return 100 + upgrades.maxHpBoost * 20; }
   function dmgMultiplier() { return 1 + upgrades.dmgBoost * 0.1; }
   function speedMultiplier() { return 1 + upgrades.speedBoost * 0.08; }
