@@ -1545,20 +1545,17 @@ function rebuildGunViewmodel() {
     group.add(grip);
   }
 
-  // Build the currently selected gun
   if (currentWeapon === 'bullet') {
-    buildBulletGun();
-  } else if (currentWeapon === 'missile') {
-    buildMissileGun();
-  } else if (currentWeapon === 'blast') {
-    buildBlastGun();
-  } else if (currentWeapon === 'plasma') {
-    buildPlasmaGun();
-  } else if (currentWeapon === 'heavy') {
-    buildHeavyGun();
-  } else {
-    buildBulletGun();
-  }
+  buildBulletGun();
+}
+
+if (currentWeapon === 'missile') {
+  buildMissileGun();
+}
+
+if (currentWeapon === 'blast') {
+  buildBlastGun();
+}
 
   gunBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
   group.position.copy(gunBasePos);
