@@ -474,10 +474,28 @@ GAME_HTML = r"""
   let trailPuffs = [];
   let explosions = [];
   let bullets = [];
-  let currentWeapon = 'missile'; // 'bullet' | 'missile' | 'blast'
-  let rapidFire = false;
-  const RAPID_MULT = 0.32;
-  const WEAPON_LABELS = { bullet: 'Bullets', missile: 'Target Missiles', blast: 'Blast Missiles' };
+  let currentWeapon = 'bullet';
+let rapidFire = false;
+
+const RAPID_MULT = 0.32;
+
+const WEAPON_LABELS = {
+  bullet: 'Bullets',
+  missile: 'Target Missiles',
+  blast: 'Blast Missiles'
+};
+
+const WEAPON_PRICES = {
+  bullet: 0,
+  missile: 20,
+  blast: 35
+};
+
+let unlockedWeapons = {
+  bullet: true,
+  missile: false,
+  blast: false
+};
   const BULLET_COOLDOWN = 0.18;
   const BULLET_SPEED = 220;
   const BULLET_LIFETIME = 1.4;
