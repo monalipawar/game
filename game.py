@@ -1672,8 +1672,14 @@ let unlockedWeapons = {
   }
   const WEAPON_HAND_COLORS = { bullet: 0xfff2b0, missile: 0x7cf7ff, blast: 0xff8844 };
   function switchWeapon(w) {
-    if (currentWeapon === w) return;
-    currentWeapon = w;
+  if (!unlockedWeapons[w]) {
+    const price = WEAPON_PRICES[w];
+    msgEl.textContent = '🔒 ' + WEAPON_LABELS[w] + ' costs ' + price + ' Orbs. Open the shop with B!';
+    return;
+  }
+
+  if (currentWeapon === w) return;
+  currentWeapon = w;
     weaponEl.textContent = weaponLabelText();
     msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
     if (humanVisual && humanVisual.userData.handWeaponAccent) {
