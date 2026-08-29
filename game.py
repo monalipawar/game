@@ -254,7 +254,7 @@ GAME_HTML = r"""
         border:1px solid rgba(124,247,255,0.3);">🛡 Shield: ready (Q)</div>
     <div id="od-weapon" style="margin-top:8px; font-size:0.85rem; color:#facc15;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
-        border:1px solid rgba(250,204,21,0.3);">🎯 Weapon: Target Missiles (2)</div>
+        border:1px solid rgba(250,204,21,0.3);">🔫 Weapon: Bullets (1)</div>
     <div id="od-pvp" style="margin-top:8px; font-size:0.85rem; color:#94a3b8;
         background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:6px 14px; border-radius:12px;
         border:1px solid rgba(148,163,184,0.3);">⚔ PvP: OFF (P)</div>
@@ -345,7 +345,7 @@ GAME_HTML = r"""
       color:#e8e6ff; font-family:'Outfit',sans-serif; font-size:0.85rem; text-align:center;
       background:rgba(20,14,50,0.55); backdrop-filter: blur(8px); padding:8px 18px; border-radius:14px;
       border:1px solid rgba(124,247,255,0.2); pointer-events:none; max-width:80%;">
-      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire (hold for rapid fire) · 1 bullets · 2 target missiles · 3 blast missiles · 4 toggles rapid fire · right-click toggles scope · P toggles PvP · B opens shop · green crosses heal you · islands are a safe zone
+      WASD/arrows move · SPACE jump · F fly · C camera · drag to look · E to fire · 1-6 switch weapons (2/3/4/5/6 must be bought in the shop) · R toggles rapid fire (hold E to unload) · right-click toggles scope · P toggles PvP · B opens shop · green crosses heal you · islands are a safe zone
   </div>
 
   <div id="od-startscreen" style="position:absolute; inset:0; z-index:10; display:flex; flex-direction:column;
@@ -355,9 +355,8 @@ GAME_HTML = r"""
         -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:8px;">OrbitDrift</div>
     <div style="max-width:440px; color:#a9a4d0; font-weight:300; margin-bottom:22px; line-height:1.5;">
       Explore a huge archipelago with other drifters. Walk the islands as your character, or
-      press F to hop into your ship and fly. Switch between rapid-fire bullets, auto-aiming
-      target missiles, and area-damage blast missiles (keys 1/2/3) — press 4 to toggle rapid
-      fire on any of them and hold E to unload, and take on 3 bosses at once who roam the map
+      press F to hop into your ship and fly. Collect orbs to earn currency, then visit the shop
+      (B) to buy new weapons and permanent upgrades. Take on 3 bosses at once who roam the map
       and shoot back. Right-click toggles a scope for precise aim. Race checkpoint gates, and
       chat below the scene. Everyone in this room shares the same boss fights.
     </div>
@@ -475,36 +474,36 @@ GAME_HTML = r"""
   let explosions = [];
   let bullets = [];
   let currentWeapon = 'bullet';
-let rapidFire = false;
+  let rapidFire = false;
 
-const RAPID_MULT = 0.32;
+  const RAPID_MULT = 0.32;
 
-const WEAPON_LABELS = {
-  bullet: 'Bullets',
-  missile: 'Target Missiles',
-  blast: 'Blast Missiles',
-  plasma: 'Plasma Cannon',
-  rapid: 'Rapid Cannon',
-  heavy: 'Heavy Cannon'
-};
+  const WEAPON_LABELS = {
+    bullet: 'Bullets',
+    missile: 'Target Missiles',
+    blast: 'Blast Missiles',
+    plasma: 'Plasma Cannon',
+    rapid: 'Rapid Cannon',
+    heavy: 'Heavy Cannon'
+  };
 
-const WEAPON_PRICES = {
-  bullet: 0,
-  missile: 20,
-  blast: 35,
-  plasma: 50,
-  rapid: 65,
-  heavy: 80
-};
+  const WEAPON_PRICES = {
+    bullet: 0,
+    missile: 20,
+    blast: 35,
+    plasma: 50,
+    rapid: 65,
+    heavy: 80
+  };
 
-let unlockedWeapons = {
-  bullet: true,
-  missile: false,
-  blast: false,
-  plasma: false,
-  rapid: false,
-  heavy: false
-};
+  let unlockedWeapons = {
+    bullet: true,
+    missile: false,
+    blast: false,
+    plasma: false,
+    rapid: false,
+    heavy: false
+  };
 
   const BULLET_COOLDOWN = 0.18;
   const BULLET_SPEED = 220;
@@ -534,186 +533,116 @@ let unlockedWeapons = {
     try { localStorage.setItem('orbitdrift_best', t.toString()); } catch(e) {}
     bestEl.textContent = t.toFixed(2) + 's';
   }
-function loadShopData() {
-  try {
-    const c = localStorage.getItem('orbitdrift_currency');
 
-    if (c === null) {
-      // First time playing
+  function loadShopData() {
+    try {
+      const c = localStorage.getItem('orbitdrift_currency');
+      currency = (c === null) ? 150 : parseInt(c, 10);
+
+      const u = localStorage.getItem('orbitdrift_upgrades');
+      if (u) upgrades = Object.assign(upgrades, JSON.parse(u));
+
+      const w = localStorage.getItem('orbitdrift_unlockedWeapons');
+      if (w) unlockedWeapons = Object.assign(unlockedWeapons, JSON.parse(w));
+    } catch(e) {
       currency = 150;
-    } else {
-      currency = c === null ? 150 : parseInt(c, 10);
     }
-
-    const u = localStorage.getItem('orbitdrift_upgrades');
-    if (u) {
-      upgrades = Object.assign(upgrades, JSON.parse(u));
-    }
-
-    const w = localStorage.getItem('orbitdrift_unlockedWeapons');
-    if (w) {
-      unlockedWeapons = Object.assign(unlockedWeapons, JSON.parse(w));
-    }
-
-  } catch(e) {
-    console.warn('Could not load shop data:', e);
-    currency = 150;
   }
-}
 
-function saveShopData() {
-  try {
-    localStorage.setItem('orbitdrift_currency', String(currency));
-    localStorage.setItem('orbitdrift_upgrades', JSON.stringify(upgrades));
-    localStorage.setItem('orbitdrift_unlockedWeapons', JSON.stringify(unlockedWeapons));
-  } catch (e) {
-    console.warn('Could not save shop data:', e);
+  function saveShopData() {
+    try {
+      localStorage.setItem('orbitdrift_currency', String(currency));
+      localStorage.setItem('orbitdrift_upgrades', JSON.stringify(upgrades));
+      localStorage.setItem('orbitdrift_unlockedWeapons', JSON.stringify(unlockedWeapons));
+    } catch (e) {}
   }
-}
-    function currentMaxHp() { return 100 + upgrades.maxHpBoost * 20; }
+
+  function currentMaxHp() { return 100 + upgrades.maxHpBoost * 20; }
   function dmgMultiplier() { return 1 + upgrades.dmgBoost * 0.1; }
   function speedMultiplier() { return 1 + upgrades.speedBoost * 0.08; }
   function shieldDurationBonus() { return upgrades.shieldBoost * 1; }
 
+  const WEAPON_SHOP_ICONS = { bullet: '🔫', missile: '🎯', blast: '💥', plasma: '🟣', rapid: '🌀', heavy: '💣' };
+  const WEAPON_SHOP_DESCS = {
+    bullet: 'Basic weapon. Fires straight, fast cooldown.',
+    missile: 'Locks onto enemies and follows them.',
+    blast: 'Explodes on impact, damaging enemies nearby.',
+    plasma: 'Slow, heavy-hitting energy bolt.',
+    rapid: 'Spews a rapid stream of light bolts.',
+    heavy: 'Devastating single shot with a long cooldown.'
+  };
+
   function renderShop() {
-  shopCurrencyEl.textContent = currency;
-  shopItemsEl.innerHTML = '';
+    shopCurrencyEl.textContent = currency;
+    shopItemsEl.innerHTML = '';
 
-  // =========================
-  // WEAPONS
-  // =========================
+    // Weapons
+    Object.keys(WEAPON_PRICES).forEach(weapon => {
+      const owned = unlockedWeapons[weapon];
+      const price = WEAPON_PRICES[weapon];
 
-  Object.keys(WEAPON_PRICES).forEach(weapon => {
-    const owned = unlockedWeapons[weapon];
-    const price = WEAPON_PRICES[weapon];
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:12px; background:rgba(255,255,255,0.04); border-radius:12px; padding:10px 14px;';
 
-    const row = document.createElement('div');
+      const info = document.createElement('div');
+      info.innerHTML = '<div style="font-weight:600;">' + WEAPON_SHOP_ICONS[weapon] + ' ' + WEAPON_LABELS[weapon] + '</div>' +
+        '<div style="font-size:0.78rem; color:#a9a4d0;">' + WEAPON_SHOP_DESCS[weapon] + '</div>';
+      row.appendChild(info);
 
-    row.style.cssText =
-      'display:flex; justify-content:space-between; align-items:center; gap:12px;' +
-      'background:rgba(255,255,255,0.04); border-radius:12px; padding:10px 14px;';
-
-    const info = document.createElement('div');
-
-    const weaponIcons = {
-      bullet: '🔫',
-      missile: '🚀',
-      blast: '💥'
-    };
-
-    info.innerHTML =
-      '<div style="font-weight:600;">' +
-      weaponIcons[weapon] + ' ' + WEAPON_LABELS[weapon] +
-      '</div>' +
-      '<div style="font-size:0.78rem; color:#a9a4d0;">' +
-      (weapon === 'bullet'
-        ? 'Basic weapon. Fires straight.'
-        : weapon === 'missile'
-        ? 'Locks onto enemies and follows them.'
-        : 'Explodes and damages enemies nearby.') +
-      '</div>';
-
-    row.appendChild(info);
-
-    const btn = document.createElement('button');
-
-    if (owned) {
-      btn.textContent = 'OWNED';
-      btn.disabled = true;
-    } else {
-      btn.textContent = 'Buy · ✨' + price;
-      btn.disabled = currency < price;
-    }
-
-    btn.style.cssText =
-      'padding:8px 16px; border-radius:10px; border:none;' +
-      'cursor:pointer; font-family:Outfit,sans-serif; font-weight:600;' +
-      'white-space:nowrap; color:#04030d; background:' +
-      (owned || currency < price
-        ? '#555'
-        : 'linear-gradient(90deg,#7cf7ff,#a78bfa)');
-
-    btn.addEventListener('click', () => {
-      if (owned || currency < price) return;
-
-      currency -= price;
-      unlockedWeapons[weapon] = true;
-
-      saveShopData();
-      renderShop();
-
-      msgEl.textContent =
-        'Purchased ' + WEAPON_LABELS[weapon] + '!';
+      const btn = document.createElement('button');
+      if (owned) {
+        btn.textContent = weapon === 'bullet' ? 'EQUIPPED BY DEFAULT' : 'OWNED';
+        btn.disabled = true;
+      } else {
+        btn.textContent = 'Buy · ✨' + price;
+        btn.disabled = currency < price;
+      }
+      btn.style.cssText = 'padding:8px 16px; border-radius:10px; border:none; cursor:pointer; font-family:Outfit,sans-serif; font-weight:600; white-space:nowrap; color:#04030d; background:' +
+        (owned || currency < price ? '#555' : 'linear-gradient(90deg,#7cf7ff,#a78bfa)');
+      btn.addEventListener('click', () => {
+        if (owned || currency < price) return;
+        currency -= price;
+        unlockedWeapons[weapon] = true;
+        saveShopData();
+        renderShop();
+        msgEl.textContent = 'Purchased ' + WEAPON_LABELS[weapon] + '! Press its number key to equip it.';
+      });
+      row.appendChild(btn);
+      shopItemsEl.appendChild(row);
     });
 
-    row.appendChild(btn);
-    shopItemsEl.appendChild(row);
-  });
+    // Upgrades
+    SHOP_ITEMS.forEach(item => {
+      const level = upgrades[item.key] || 0;
+      const maxed = level >= item.max;
+      const cost = item.cost + level * 6;
 
-  // =========================
-  // UPGRADES
-  // =========================
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:12px; background:rgba(255,255,255,0.04); border-radius:12px; padding:10px 14px;';
 
-  SHOP_ITEMS.forEach(item => {
-    const level = upgrades[item.key] || 0;
-    const maxed = level >= item.max;
-    const cost = item.cost + level * 6;
+      const info = document.createElement('div');
+      info.innerHTML = '<div style="font-weight:600;">' + item.name + ' <span style="color:#94a3b8; font-weight:400;">(Lv ' + level + '/' + item.max + ')</span></div>' +
+        '<div style="font-size:0.78rem; color:#a9a4d0;">' + item.desc + '</div>';
+      row.appendChild(info);
 
-    const row = document.createElement('div');
-
-    row.style.cssText =
-      'display:flex; justify-content:space-between; align-items:center; gap:12px;' +
-      'background:rgba(255,255,255,0.04); border-radius:12px; padding:10px 14px;';
-
-    const info = document.createElement('div');
-
-    info.innerHTML =
-      '<div style="font-weight:600;">' +
-      item.name +
-      ' <span style="color:#94a3b8; font-weight:400;">(Lv ' +
-      level + '/' + item.max + ')</span></div>' +
-      '<div style="font-size:0.78rem; color:#a9a4d0;">' +
-      item.desc +
-      '</div>';
-
-    row.appendChild(info);
-
-    const btn = document.createElement('button');
-
-    btn.textContent =
-      maxed ? 'MAXED' : ('Buy · ✨' + cost);
-
-    btn.disabled =
-      maxed || currency < cost;
-
-    btn.style.cssText =
-      'padding:8px 16px; border-radius:10px; border:none;' +
-      'cursor:pointer; font-family:Outfit,sans-serif; font-weight:600;' +
-      'white-space:nowrap; color:#04030d; background:' +
-      (maxed
-        ? '#555'
-        : (currency < cost
-          ? '#555'
-          : 'linear-gradient(90deg,#7cf7ff,#a78bfa)'));
-
-    btn.addEventListener('click', () => {
-      if (maxed || currency < cost) return;
-
-      currency -= cost;
-      upgrades[item.key] = level + 1;
-
-      saveShopData();
-      applyUpgrades();
-      renderShop();
-
-      msgEl.textContent =
-        'Purchased ' + item.name + '!';
+      const btn = document.createElement('button');
+      btn.textContent = maxed ? 'MAXED' : ('Buy · ✨' + cost);
+      btn.disabled = maxed || currency < cost;
+      btn.style.cssText = 'padding:8px 16px; border-radius:10px; border:none; cursor:pointer; font-family:Outfit,sans-serif; font-weight:600; white-space:nowrap; color:#04030d; background:' +
+        (maxed ? '#555' : (currency < cost ? '#555' : 'linear-gradient(90deg,#7cf7ff,#a78bfa)'));
+      btn.addEventListener('click', () => {
+        if (maxed || currency < cost) return;
+        currency -= cost;
+        upgrades[item.key] = level + 1;
+        saveShopData();
+        applyUpgrades();
+        renderShop();
+        msgEl.textContent = 'Purchased ' + item.name + '!';
+      });
+      row.appendChild(btn);
+      shopItemsEl.appendChild(row);
     });
-
-    row.appendChild(btn);
-    shopItemsEl.appendChild(row);
-  });
-}
+  }
 
   function applyUpgrades() {
     const newMax = currentMaxHp();
@@ -824,6 +753,8 @@ function saveShopData() {
     camera.lookAt(0, 6, 0);
     yaw = 0; pitch = 0.28;
     scene.add(camera);
+
+    loadShopData();
     buildGunViewmodel();
 
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
@@ -891,7 +822,7 @@ function saveShopData() {
         if (k === '4') switchWeapon('plasma');
         if (k === '5') switchWeapon('rapid');
         if (k === '6') switchWeapon('heavy');
-        if (k === '4') toggleRapidFire();
+        if (k === 'r') toggleRapidFire();
         if (k === 'p') togglePvp();
         if (k === 'b') toggleShop();
       }
@@ -941,8 +872,8 @@ function saveShopData() {
     });
 
     loadBest();
-    loadShopData();
     applyUpgrades();
+    weaponEl.textContent = weaponLabelText();
     updateHudStatic();
     animate();
 
@@ -1344,309 +1275,169 @@ function saveShopData() {
       b.mesh.position.addScaledVector(dir, 28 * dt);
     }
   }
+
   function buildGunViewmodel() {
-  const group = new THREE.Group();
+    const group = new THREE.Group();
 
-  const metal = new THREE.MeshStandardMaterial({
-    color: 0x2a2f45,
-    metalness: 0.7,
-    roughness: 0.35
-  });
+    const metal = new THREE.MeshStandardMaterial({ color: 0x2a2f45, metalness: 0.7, roughness: 0.35 });
+    const accent = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x2dd4bf, emissiveIntensity: 0.9, metalness: 0.4, roughness: 0.3 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x111525, metalness: 0.8, roughness: 0.25 });
 
-  const accent = new THREE.MeshStandardMaterial({
-    color: 0x7cf7ff,
-    emissive: 0x2dd4bf,
-    emissiveIntensity: 0.9,
-    metalness: 0.4,
-    roughness: 0.3
-  });
+    // 1 — Basic bullet gun
+    function buildBulletGun() {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.55), metal);
+      body.position.set(0, 0, -0.1);
+      group.add(body);
 
-  const dark = new THREE.MeshStandardMaterial({
-    color: 0x111525,
-    metalness: 0.8,
-    roughness: 0.25
-  });
-function rebuildGunViewmodel() {
-  if (gunGroup) {
-    camera.remove(gunGroup);
-  }
-
-  gunGroup = null;
-  gunMuzzle = null;
-
-  buildGunViewmodel();
-}
-  // =========================
-  // 1 — BASIC BULLET GUN
-  // =========================
-  function buildBulletGun() {
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 0.14, 0.55), metal
-    );
-    body.position.set(0, 0, -0.1);
-    group.add(body);
-
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.045, 0.055, 0.4, 10), metal
-    );
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.01, -0.55);
-    group.add(barrel);
-
-    const tip = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.045, 0.08, 10), accent
-    );
-    tip.rotation.x = Math.PI / 2;
-    tip.position.set(0, 0.01, -0.76);
-    group.add(tip);
-
-    const grip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.11, 0.28, 0.12), metal
-    );
-    grip.position.set(0, -0.18, 0.12);
-    grip.rotation.x = 0.25;
-    group.add(grip);
-
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.17, 0.03, 0.2), accent
-    );
-    stripe.position.set(0, 0.06, -0.05);
-    group.add(stripe);
-  }
-
-  // =========================
-  // 2 — RAPID FIRE GUN
-  // =========================
-  function buildRapidGun() {
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.18, 0.5), dark
-    );
-    body.position.z = -0.1;
-    group.add(body);
-
-    // Three barrels
-    [-0.07, 0, 0.07].forEach(x => {
-      const barrel = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.035, 0.045, 0.55, 8),
-        metal
-      );
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.4, 10), metal);
       barrel.rotation.x = Math.PI / 2;
-      barrel.position.set(x, 0, -0.55);
+      barrel.position.set(0, 0.01, -0.55);
       group.add(barrel);
-    });
 
-    const grip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.13, 0.3, 0.14), dark
-    );
-    grip.position.set(0, -0.2, 0.1);
-    grip.rotation.x = 0.25;
-    group.add(grip);
+      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.08, 10), accent);
+      tip.rotation.x = Math.PI / 2;
+      tip.position.set(0, 0.01, -0.76);
+      group.add(tip);
+
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.28, 0.12), metal);
+      grip.position.set(0, -0.18, 0.12);
+      grip.rotation.x = 0.25;
+      group.add(grip);
+
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.03, 0.2), accent);
+      stripe.position.set(0, 0.06, -0.05);
+      group.add(stripe);
+    }
+
+    // 2 — Missile launcher
+    function buildMissileGun() {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.6), dark);
+      body.position.z = -0.05;
+      group.add(body);
+
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.7, 12), metal);
+      tube.rotation.x = Math.PI / 2;
+      tube.position.z = -0.55;
+      group.add(tube);
+
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.025, 8, 16), accent);
+      ring.position.z = -0.9;
+      group.add(ring);
+
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.3, 0.15), dark);
+      grip.position.set(0, -0.2, 0.1);
+      grip.rotation.x = 0.25;
+      group.add(grip);
+    }
+
+    // 3 — Blast cannon
+    function buildBlastGun() {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.55), dark);
+      body.position.z = -0.05;
+      group.add(body);
+
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.55, 12), accent);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.z = -0.55;
+      group.add(barrel);
+
+      const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 0.12, 12), metal);
+      muzzle.rotation.x = Math.PI / 2;
+      muzzle.position.z = -0.86;
+      group.add(muzzle);
+
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.32, 0.16), dark);
+      grip.position.set(0, -0.2, 0.1);
+      grip.rotation.x = 0.25;
+      group.add(grip);
+    }
+
+    // 4 — Plasma cannon
+    function buildPlasmaGun() {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.22, 0.65), metal);
+      body.position.z = -0.05;
+      group.add(body);
+
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.75, 12), accent);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.z = -0.65;
+      group.add(barrel);
+
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), accent);
+      core.position.z = -1.02;
+      group.add(core);
+
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.3, 0.15), dark);
+      grip.position.set(0, -0.2, 0.12);
+      grip.rotation.x = 0.25;
+      group.add(grip);
+    }
+
+    // 5 — Rapid cannon
+    function buildRapidGun() {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.22, 0.6), dark);
+      body.position.z = -0.05;
+      group.add(body);
+
+      [-0.12, -0.04, 0.04, 0.12].forEach(x => {
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.65, 8), accent);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(x, 0, -0.62);
+        group.add(barrel);
+      });
+
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 12), accent);
+      core.position.set(0, 0.02, -0.98);
+      group.add(core);
+
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.3, 0.15), dark);
+      grip.position.set(0, -0.2, 0.1);
+      grip.rotation.x = 0.25;
+      group.add(grip);
+    }
+
+    // 6 — Heavy cannon
+    function buildHeavyGun() {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.7), dark);
+      body.position.z = -0.02;
+      group.add(body);
+
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.16, 0.8, 12), metal);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.z = -0.7;
+      group.add(barrel);
+
+      const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.19, 0.14, 12), accent);
+      muzzle.rotation.x = Math.PI / 2;
+      muzzle.position.z = -1.12;
+      group.add(muzzle);
+
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.35, 0.18), dark);
+      grip.position.set(0, -0.23, 0.15);
+      grip.rotation.x = 0.25;
+      group.add(grip);
+    }
+
+    if (currentWeapon === 'bullet') buildBulletGun();
+    else if (currentWeapon === 'missile') buildMissileGun();
+    else if (currentWeapon === 'blast') buildBlastGun();
+    else if (currentWeapon === 'plasma') buildPlasmaGun();
+    else if (currentWeapon === 'rapid') buildRapidGun();
+    else if (currentWeapon === 'heavy') buildHeavyGun();
+    else buildBulletGun();
+
+    gunBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
+    group.position.copy(gunBasePos);
+    group.rotation.y = -0.05;
+
+    camera.add(group);
+    gunGroup = group;
+
+    gunMuzzle = new THREE.Object3D();
+    gunMuzzle.position.set(0, 0.01, -1.0);
+    group.add(gunMuzzle);
   }
 
-  // =========================
-  // 3 — MISSILE LAUNCHER
-  // =========================
-  function buildMissileGun() {
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.28, 0.22, 0.6), dark
-    );
-    body.position.z = -0.05;
-    group.add(body);
-
-    // Missile tube
-    const tube = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.12, 0.7, 12),
-      metal
-    );
-    tube.rotation.x = Math.PI / 2;
-    tube.position.z = -0.55;
-    group.add(tube);
-
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.12, 0.025, 8, 16),
-      accent
-    );
-    ring.position.z = -0.9;
-    group.add(ring);
-
-    const grip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.15, 0.3, 0.15), dark
-    );
-    grip.position.set(0, -0.2, 0.1);
-    grip.rotation.x = 0.25;
-    group.add(grip);
-  }
-
-  // =========================
-  // 4 — BLAST CANNON
-  // =========================
-  function buildBlastGun() {
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.3, 0.25, 0.55), dark
-    );
-    body.position.z = -0.05;
-    group.add(body);
-
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.12, 0.55, 12),
-      accent
-    );
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.z = -0.55;
-    group.add(barrel);
-
-    const muzzle = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.15, 0.12, 12),
-      metal
-    );
-    muzzle.rotation.x = Math.PI / 2;
-    muzzle.position.z = -0.86;
-    group.add(muzzle);
-
-    const grip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.16, 0.32, 0.16), dark
-    );
-    grip.position.set(0, -0.2, 0.1);
-    grip.rotation.x = 0.25;
-    group.add(grip);
-  }
-
-  // =========================
-  // 5 — PLASMA CANNON
-  // =========================
-  function buildPlasmaGun() {
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.25, 0.22, 0.65), metal
-    );
-    body.position.z = -0.05;
-    group.add(body);
-
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.09, 0.11, 0.75, 12),
-      accent
-    );
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.z = -0.65;
-    group.add(barrel);
-
-    const core = new THREE.Mesh(
-      new THREE.SphereGeometry(0.1, 12, 12),
-      accent
-    );
-    core.position.z = -1.02;
-    group.add(core);
-
-    const grip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.3, 0.15), dark
-    );
-    grip.position.set(0, -0.2, 0.12);
-    grip.rotation.x = 0.25;
-    group.add(grip);
-  }
-  
-function buildRapidGun() {
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(0.3, 0.22, 0.6),
-    dark
-  );
-  body.position.z = -0.05;
-  group.add(body);
-
-  // Four rapid-fire barrels
-  [-0.12, -0.04, 0.04, 0.12].forEach(x => {
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.035, 0.045, 0.65, 8),
-      accent
-    );
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(x, 0, -0.62);
-    group.add(barrel);
-  });
-
-  const core = new THREE.Mesh(
-    new THREE.SphereGeometry(0.08, 12, 12),
-    accent
-  );
-  core.position.set(0, 0.02, -0.98);
-  group.add(core);
-
-  const grip = new THREE.Mesh(
-    new THREE.BoxGeometry(0.16, 0.3, 0.15),
-    dark
-  );
-  grip.position.set(0, -0.2, 0.1);
-  grip.rotation.x = 0.25;
-  group.add(grip);
-}
-
-  // =========================
-  // 6 — HEAVY CANNON
-  // =========================
-  function buildHeavyGun() {
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(0.34, 0.3, 0.7), dark
-    );
-    body.position.z = -0.02;
-    group.add(body);
-
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.16, 0.8, 12),
-      metal
-    );
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.z = -0.7;
-    group.add(barrel);
-
-    const muzzle = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.23, 0.19, 0.14, 12),
-      accent
-    );
-    muzzle.rotation.x = Math.PI / 2;
-    muzzle.position.z = -1.12;
-    group.add(muzzle);
-
-    const grip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.35, 0.18), dark
-    );
-    grip.position.set(0, -0.23, 0.15);
-    grip.rotation.x = 0.25;
-    group.add(grip);
-  }
-
- if (currentWeapon === 'bullet') {
-  buildBulletGun();
-}
-
-if (currentWeapon === 'missile') {
-  buildMissileGun();
-}
-
-if (currentWeapon === 'blast') {
-  buildBlastGun();
-}
-
-if (currentWeapon === 'plasma') {
-  buildPlasmaGun();
-}
-
-if (currentWeapon === 'rapid') {
-  buildRapidGun();
-}
-
-if (currentWeapon === 'heavy') {
-  buildHeavyGun();
-}
-  gunBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
-  group.position.copy(gunBasePos);
-  group.rotation.y = -0.05;
-
-  camera.add(group);
-  gunGroup = group;
-
-  gunMuzzle = new THREE.Object3D();
-  gunMuzzle.position.set(0, 0.01, -1.0);
-  group.add(gunMuzzle);
-}
   function updateGunViewmodel(dt) {
     if (!gunGroup) return;
     const now = performance.now() / 1000;
@@ -2000,11 +1791,13 @@ if (currentWeapon === 'heavy') {
 
   function fireBolt() {
     if (!started) return;
+    if (!unlockedWeapons[currentWeapon]) return;
     const now = performance.now() / 1000;
     const mult = rapidFire ? RAPID_MULT : 1;
 
-    if (currentWeapon === 'bullet') {
-      if (now - lastAttack < BULLET_COOLDOWN * mult) return;
+    if (currentWeapon === 'bullet' || currentWeapon === 'plasma' || currentWeapon === 'rapid' || currentWeapon === 'heavy') {
+      const cooldowns = { bullet: BULLET_COOLDOWN, plasma: 0.9, rapid: 0.09, heavy: 1.8 };
+      if (now - lastAttack < cooldowns[currentWeapon] * mult) return;
       fireBulletShot(now);
       return;
     }
@@ -2049,6 +1842,19 @@ if (currentWeapon === 'heavy') {
     freeBolts.push({ mesh: bolt, dir: dir.clone(), dmg, born: now, lastPuff: now, blast: isBlast });
   }
 
+  const BULLET_TYPE_DAMAGE = {
+    bullet: () => 5 + Math.floor(Math.random() * 5),
+    plasma: () => 22 + Math.floor(Math.random() * 10),
+    rapid: () => 4 + Math.floor(Math.random() * 3),
+    heavy: () => 45 + Math.floor(Math.random() * 20)
+  };
+  const BULLET_TYPE_COLOR = {
+    bullet: { color: 0xfff2b0, emissive: 0xffcc55 },
+    plasma: { color: 0xd9a3ff, emissive: 0x9333ea },
+    rapid: { color: 0x7cf7ff, emissive: 0x2dd4bf },
+    heavy: { color: 0xff8844, emissive: 0xff5511 }
+  };
+
   function fireBulletShot(now) {
     lastAttack = now;
     recoil();
@@ -2056,13 +1862,16 @@ if (currentWeapon === 'heavy') {
     camera.getWorldDirection(dir);
     const muzzlePos = new THREE.Vector3();
     gunMuzzle.getWorldPosition(muzzlePos);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xfff2b0, emissive: 0xffcc55, emissiveIntensity: 1.6 });
-    const bullet = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 6), mat);
+    const palette = BULLET_TYPE_COLOR[currentWeapon] || BULLET_TYPE_COLOR.bullet;
+    const mat = new THREE.MeshStandardMaterial({ color: palette.color, emissive: palette.emissive, emissiveIntensity: 1.6 });
+    const size = currentWeapon === 'heavy' ? 0.07 : (currentWeapon === 'plasma' ? 0.055 : 0.035);
+    const bullet = new THREE.Mesh(new THREE.CylinderGeometry(size, size, size * 8.5, 6), mat);
     bullet.rotation.x = Math.PI / 2;
     bullet.position.copy(muzzlePos);
     orientMissile(bullet, dir);
     scene.add(bullet);
-    const dmg = Math.round((5 + Math.floor(Math.random() * 5)) * dmgMultiplier());
+    const dmgFn = BULLET_TYPE_DAMAGE[currentWeapon] || BULLET_TYPE_DAMAGE.bullet;
+    const dmg = Math.round(dmgFn() * dmgMultiplier());
     bullets.push({ mesh: bullet, dir: dir.clone(), dmg, born: now });
   }
 
@@ -2070,42 +1879,39 @@ if (currentWeapon === 'heavy') {
     gunKick = 1;
   }
 
-  const WEAPON_ICONS = { bullet: '🔫', missile: '🎯', blast: '💥' };
-  const WEAPON_KEYS = { bullet: '1', missile: '2', blast: '3' };
+  const WEAPON_ICONS = { bullet: '🔫', missile: '🎯', blast: '💥', plasma: '🟣', rapid: '🌀', heavy: '💣' };
+  const WEAPON_KEYS = { bullet: '1', missile: '2', blast: '3', plasma: '4', rapid: '5', heavy: '6' };
   function weaponLabelText() {
     return WEAPON_ICONS[currentWeapon] + ' Weapon: ' + WEAPON_LABELS[currentWeapon] + ' (' + WEAPON_KEYS[currentWeapon] + ')' + (rapidFire ? ' ⚡ RAPID' : '');
   }
-  const WEAPON_HAND_COLORS = { bullet: 0xfff2b0, missile: 0x7cf7ff, blast: 0xff8844 };
+  const WEAPON_HAND_COLORS = { bullet: 0xfff2b0, missile: 0x7cf7ff, blast: 0xff8844, plasma: 0xd9a3ff, rapid: 0x7cf7ff, heavy: 0xff8844 };
+
   function switchWeapon(w) {
-  if (!unlockedWeapons[w]) {
-    const price = WEAPON_PRICES[w];
-    msgEl.textContent =
-      '🔒 ' + WEAPON_LABELS[w] +
-      ' costs ' + price + ' Orbs. Open the shop with B!';
-    return;
+    if (!unlockedWeapons[w]) {
+      const price = WEAPON_PRICES[w];
+      msgEl.textContent = '🔒 ' + WEAPON_LABELS[w] + ' costs ✨' + price + '. Open the shop with B to buy it!';
+      return;
+    }
+    if (currentWeapon === w) return;
+    currentWeapon = w;
+
+    if (gunGroup) {
+      camera.remove(gunGroup);
+      gunGroup = null;
+      gunMuzzle = null;
+    }
+    buildGunViewmodel();
+
+    weaponEl.textContent = weaponLabelText();
+    msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
+
+    if (humanVisual && humanVisual.userData.handWeaponAccent) {
+      const c = WEAPON_HAND_COLORS[w];
+      humanVisual.userData.handWeaponAccent.color.setHex(c);
+      humanVisual.userData.handWeaponAccent.emissive.setHex(c);
+    }
   }
 
-  currentWeapon = w;
-
-  // Remove the old gun
-  if (gunGroup) {
-    camera.remove(gunGroup);
-    gunGroup = null;
-    gunMuzzle = null;
-  }
-
-  // Build the new gun
-  buildGunViewmodel();
-
-  weaponEl.textContent = weaponLabelText();
-  msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
-
-  if (humanVisual && humanVisual.userData.handWeaponAccent) {
-    const c = WEAPON_HAND_COLORS[w];
-    humanVisual.userData.handWeaponAccent.color.setHex(c);
-    humanVisual.userData.handWeaponAccent.emissive.setHex(c);
-  }
-}
   function toggleRapidFire() {
     rapidFire = !rapidFire;
     weaponEl.textContent = weaponLabelText();
@@ -2259,7 +2065,6 @@ if (currentWeapon === 'heavy') {
               }
               explodeSplash(impactPos, b.dmg, false, e);
             }
-            hitEnemyRef = e;
             hit = true;
             break;
           }
@@ -2279,7 +2084,6 @@ if (currentWeapon === 'heavy') {
       }
     }
   }
-
 
   function updateBolts(dt) {
     const now = performance.now() / 1000;
@@ -2412,12 +2216,8 @@ if (currentWeapon === 'heavy') {
       if (keys['shift']) move.y -= MOVE_SPEED * 1.6;
 
       player.position.addScaledVector(move, dt);
-
-// Keep the player completely weightless while flying
-playerVel.x = 0;
-playerVel.y = 0;
-playerVel.z = 0;
-onGround = false;
+      playerVel.set(0, 0, 0);
+      onGround = false;
 
       if (move.lengthSq() > 0.001) {
         const targetAngle = Math.atan2(move.x, move.z);
