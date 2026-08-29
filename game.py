@@ -951,29 +951,15 @@ GAME_HTML = r"""
     pack.position.set(0, 0.15, -0.24);
     group.add(pack);
 
-    // Handheld weapon, attached to the right arm so it moves and rotates with it.
-    const handWeapon = new THREE.Group();
-    const gunMetal = new THREE.MeshStandardMaterial({ color: 0x2a2f45, metalness: 0.7, roughness: 0.35 });
-    const gunAccent = new THREE.MeshStandardMaterial({ color: 0x7cf7ff, emissive: 0x2dd4bf, emissiveIntensity: 0.9 });
-    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.34), gunMetal);
-    handWeapon.add(gunBody);
-    const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.22, 8), gunMetal);
-    gunBarrel.rotation.x = Math.PI / 2;
-    gunBarrel.position.set(0, 0.005, -0.28);
-    handWeapon.add(gunBarrel);
-    const gunTip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.028, 0.05, 8), gunAccent);
-    gunTip.rotation.x = Math.PI / 2;
-    gunTip.position.set(0, 0.005, -0.39);
-    handWeapon.add(gunTip);
-    const gunGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.06), gunMetal);
-    gunGrip.position.set(0, -0.1, 0.1);
-    gunGrip.rotation.x = 0.3;
-    handWeapon.add(gunGrip);
+    // Handheld weapon, attached to the right arm so it moves, rotates, and changes
+    // shape with it whenever the player switches weapons.
+    const handWeapon = createWeaponMesh(currentWeapon);
+    handWeapon.scale.set(0.55, 0.55, 0.55);
     handWeapon.position.set(0, -0.32, -0.1);
     handWeapon.rotation.x = -0.15;
     armR.add(handWeapon);
     group.userData.handWeapon = handWeapon;
-    group.userData.handWeaponAccent = gunAccent;
+    group.userData.armR = armR;
 
     group.position.y = 0.75;
     return group;
@@ -1276,7 +1262,7 @@ GAME_HTML = r"""
     }
   }
 
-  function buildGunViewmodel() {
+  function createWeaponMesh(weaponKey) {
     const group = new THREE.Group();
 
     const metal = new THREE.MeshStandardMaterial({ color: 0x2a2f45, metalness: 0.7, roughness: 0.35 });
@@ -1418,13 +1404,20 @@ GAME_HTML = r"""
       group.add(grip);
     }
 
-    if (currentWeapon === 'bullet') buildBulletGun();
-    else if (currentWeapon === 'missile') buildMissileGun();
-    else if (currentWeapon === 'blast') buildBlastGun();
-    else if (currentWeapon === 'plasma') buildPlasmaGun();
-    else if (currentWeapon === 'rapid') buildRapidGun();
-    else if (currentWeapon === 'heavy') buildHeavyGun();
+    if (weaponKey === 'bullet') buildBulletGun();
+    else if (weaponKey === 'missile') buildMissileGun();
+    else if (weaponKey === 'blast') buildBlastGun();
+    else if (weaponKey === 'plasma') buildPlasmaGun();
+    else if (weaponKey === 'rapid') buildRapidGun();
+    else if (weaponKey === 'heavy') buildHeavyGun();
     else buildBulletGun();
+
+    group.userData.accent = accent;
+    return group;
+  }
+
+  function buildGunViewmodel() {
+    const group = createWeaponMesh(currentWeapon);
 
     gunBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
     group.position.copy(gunBasePos);
@@ -1884,8 +1877,6 @@ GAME_HTML = r"""
   function weaponLabelText() {
     return WEAPON_ICONS[currentWeapon] + ' Weapon: ' + WEAPON_LABELS[currentWeapon] + ' (' + WEAPON_KEYS[currentWeapon] + ')' + (rapidFire ? ' ⚡ RAPID' : '');
   }
-  const WEAPON_HAND_COLORS = { bullet: 0xfff2b0, missile: 0x7cf7ff, blast: 0xff8844, plasma: 0xd9a3ff, rapid: 0x7cf7ff, heavy: 0xff8844 };
-
   function switchWeapon(w) {
     if (!unlockedWeapons[w]) {
       const price = WEAPON_PRICES[w];
@@ -1902,14 +1893,20 @@ GAME_HTML = r"""
     }
     buildGunViewmodel();
 
+    // Swap the handheld weapon model on the third-person character to match.
+    if (humanVisual && humanVisual.userData.armR) {
+      const armR = humanVisual.userData.armR;
+      if (humanVisual.userData.handWeapon) armR.remove(humanVisual.userData.handWeapon);
+      const newHand = createWeaponMesh(w);
+      newHand.scale.set(0.55, 0.55, 0.55);
+      newHand.position.set(0, -0.32, -0.1);
+      newHand.rotation.x = -0.15;
+      armR.add(newHand);
+      humanVisual.userData.handWeapon = newHand;
+    }
+
     weaponEl.textContent = weaponLabelText();
     msgEl.textContent = 'Switched to ' + WEAPON_LABELS[w] + '.';
-
-    if (humanVisual && humanVisual.userData.handWeaponAccent) {
-      const c = WEAPON_HAND_COLORS[w];
-      humanVisual.userData.handWeaponAccent.color.setHex(c);
-      humanVisual.userData.handWeaponAccent.emissive.setHex(c);
-    }
   }
 
   function toggleRapidFire() {
